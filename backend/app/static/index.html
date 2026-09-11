@@ -478,17 +478,14 @@
                         <el-menu-item index="env_management">
                             <i class="fa-solid fa-layer-group menu-icon" style="color: #0284c7;"></i>
                             <span>环境管理</span>
-                            <span class="sub-badge">{{ environmentList.length }}</span>
                         </el-menu-item>
                         <el-menu-item index="machine_management">
                             <i class="fa-solid fa-server menu-icon" style="color: #10b981;"></i>
                             <span>机器管理</span>
-                            <span class="sub-badge">{{ machineList.length }}</span>
                         </el-menu-item>
                         <el-menu-item index="api_management">
                             <i class="fa-solid fa-code menu-icon" style="color: #8b5cf6;"></i>
                             <span>接口管理</span>
-                            <span class="sub-badge">{{ apiList.length }}</span>
                         </el-menu-item>
                     </el-sub-menu>
 
@@ -505,7 +502,6 @@
                         <el-menu-item index="incidents">
                             <i class="fa-solid fa-triangle-exclamation menu-icon" style="color: #ef4444;"></i>
                             <span>故障告警排障中心</span>
-                            <span v-if="(summary.down_count || 0) > 0" class="sub-badge danger">{{ summary.down_count }}</span>
                         </el-menu-item>
                     </el-sub-menu>
 
@@ -1168,40 +1164,79 @@
 
                 <!-- 视图 4: 故障告警排障中心 (Incidents) -->
                 <div v-show="currentNav === 'incidents'">
+                    <!-- 故障排障列表卡片 -->
                     <div class="wb-card">
-                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #ef4444; display: flex; align-items: center; gap: 8px;">
-                            <i class="fa-solid fa-triangle-exclamation"></i>
-                            <span>故障告警排障中心 (当前异常节点清单)</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div style="font-size: 15px; font-weight: 600; color: #ef4444; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-triangle-exclamation"></i>
+                                    <span>实时告警与受损节点清单</span>
+                                </div>
+                                <el-tag size="small" :type="downTargets.length > 0 ? 'danger' : 'success'" effect="plain">
+                                    {{ downTargets.length }} 个故障目标待处置
+                                </el-tag>
+                                <el-input 
+                                    v-model="incidentSearchQuery" 
+                                    placeholder="搜索故障目标、地址或环境..." 
+                                    clearable 
+                                    size="small" 
+                                    style="width: 230px;">
+                                    <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
+                                </el-input>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <el-button size="small" type="primary" plain @click="fetchData">
+                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新
+                                </el-button>
+                            </div>
                         </div>
-                        <div v-if="downTargets.length === 0" style="text-align: center; padding: 40px; color: #34d399;">
-                            <i class="fa-solid fa-circle-check" style="font-size: 48px; margin-bottom: 12px;"></i>
-                            <div style="font-size: 16px; font-weight: 600;">太棒了！当前没有任何异常节点</div>
-                            <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">所有托管服务均处于连通与 Schema 完全合规状态。</div>
+
+                        <div v-if="filteredDownTargets.length === 0" style="text-align: center; padding: 48px 20px; color: #059669;">
+                            <i class="fa-solid fa-circle-check" style="font-size: 48px; margin-bottom: 12px; color: #10b981;"></i>
+                            <div style="font-size: 16px; font-weight: 600; color: #0f172a;">太棒了！当前没有任何异常受损节点</div>
+                            <div style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">所有环境网络拓扑、宿主机器与契约接口均处于健康合规运行状态。</div>
                         </div>
-                        <el-table v-else :data="downTargets" style="width: 100%">
-                            <el-table-column prop="group_name" label="环境" width="120">
+                        <el-table v-else :data="filteredDownTargets" style="width: 100%">
+                            <el-table-column prop="group_name" label="所属环境" width="130">
                                 <template #default="{ row }">
-                                    <el-tag size="small" type="danger">{{ row.group_name }}</el-tag>
+                                    <el-tag size="small" type="danger" effect="light">{{ row.group_name || '生产环境' }}</el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="name" label="故障目标" min-width="160"></el-table-column>
-                            <el-table-column label="地址" min-width="220">
-                                <template #default="{ row }"><span class="code-pill">{{ row.host }}:{{ row.port }}{{ row.http_path }}</span></template>
+                            <el-table-column prop="name" label="受损目标名称" min-width="170">
+                                <template #default="{ row }">
+                                    <div style="font-weight: 600; color: #0f172a;">{{ row.name }}</div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="网络访问地址" min-width="240">
+                                <template #default="{ row }"><span class="code-pill">{{ row.http_method }} {{ row.host }}:{{ row.port }}{{ row.http_path }}</span></template>
+                            </el-table-column>
+                            <el-table-column label="健康状态" width="130" align="center">
+                                <template #default="{ row }">
+                                    <span :class="getStatusBadgeClass(row.current_status)">
+                                        <i :class="getStatusIcon(row.current_status)"></i>
+                                        {{ row.current_status }}
+                                    </span>
+                                </template>
                             </el-table-column>
                             <el-table-column label="捕获延迟" width="120" align="center">
                                 <template #default="{ row }">
                                     <span v-if="row.last_latency_ms" :class="getLatencyBadgeClass(row.last_latency_ms)">
                                         {{ row.last_latency_ms }} ms
                                     </span>
-                                    <span v-else style="color: #dc2626; font-size: 11.5px; font-weight: 600;">断开/超时</span>
+                                    <span v-else style="color: #dc2626; font-size: 12px; font-weight: 600;">断开/超时</span>
                                 </template>
                             </el-table-column>
                             <el-table-column prop="consecutive_failures" label="连续失败" width="100" align="center">
                                 <template #default="{ row }"><el-tag type="danger" effect="dark">{{ row.consecutive_failures }} 次</el-tag></template>
                             </el-table-column>
-                            <el-table-column label="操作" width="160" align="center">
+                            <el-table-column label="操作" width="200" align="center" fixed="right">
                                 <template #default="{ row }">
-                                    <el-button size="small" type="primary" @click="openMetricsDrawer(row)">排障诊断</el-button>
+                                    <el-button size="small" type="success" plain :loading="triggeringId === row.id" @click="handleTrigger(row)">
+                                        <i class="fa-solid fa-bolt" style="margin-right: 4px;"></i>复测
+                                    </el-button>
+                                    <el-button size="small" type="primary" plain @click="openMetricsDrawer(row)">
+                                        <i class="fa-solid fa-chart-line" style="margin-right: 4px;"></i>排障诊断
+                                    </el-button>
                                 </template>
                             </el-table-column>
                         </el-table>

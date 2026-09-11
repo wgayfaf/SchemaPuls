@@ -141,8 +141,21 @@ const app = createApp({
         });
 
         // 故障异常节点提取 (用于 Incidents 视图)
+        const incidentSearchQuery = ref("");
         const downTargets = computed(() => {
             return targets.value.filter(t => t.current_status === "DOWN" || t.current_status === "DEGRADED");
+        });
+        const filteredDownTargets = computed(() => {
+            if (!incidentSearchQuery.value || !incidentSearchQuery.value.trim()) {
+                return downTargets.value;
+            }
+            const q = incidentSearchQuery.value.toLowerCase().trim();
+            return downTargets.value.filter(t => 
+                (t.name && t.name.toLowerCase().includes(q)) ||
+                (t.host && t.host.toLowerCase().includes(q)) ||
+                (t.http_path && t.http_path.toLowerCase().includes(q)) ||
+                (t.group_name && t.group_name.toLowerCase().includes(q))
+            );
         });
 
         // 根据选中的环境分组过滤
@@ -1124,6 +1137,8 @@ const app = createApp({
             handleMenuSelect,
             navTitle,
             downTargets,
+            incidentSearchQuery,
+            filteredDownTargets,
             filteredTargets,
             switchNav,
             filterBySidebarGroup,
