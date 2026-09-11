@@ -18,7 +18,8 @@ from app.models import (
 from app.services.probe_service import (
     execute_machine_probe,
     execute_api_probe,
-    execute_probe_for_target
+    execute_probe_for_target,
+    check_schema
 )
 from app.services.scheduler import (
     init_scheduler,
@@ -804,7 +805,29 @@ def infer_json_schema(req: InferSchemaRequest):
                     make_strict(item)
         make_strict(schema)
 
-    return schema
+    # 兼顾同时支持 res.data 直接使用与 res.data.schema
+    return {
+        **schema,
+        "schema": schema,
+        "status": "ok"
+    }
+
+
+class ValidateSchemaRequest(BaseModel):
+    sample_json: Any
+    expected_schema: Dict[str, Any]
+
+
+@app.post("/api/tools/validate-schema")
+def validate_json_schema(req: ValidateSchemaRequest):
+    """在契约实验室中对比样本数据与预期 Schema，返回破坏性突变列表"""
+    is_valid, errors = check_schema(req.sample_json, req.expected_schema)
+    return {
+        "valid": is_valid,
+        "errors": errors,
+        "error_count": len(errors),
+        "status": "ok"
+    }
 
 
 # 机器时序指标
@@ -847,6 +870,77 @@ def get_api_metrics(id: int, session: Session = Depends(get_session)):
         for r in reversed(records)
     ]
     return {"api_id": id, "points": points}
+
+
+# 接口探针历史探测流水记录
+@app.get("/api/apis/{id}/history")
+def get_api_history(
+    id: int,
+    limit: int = 50,
+    session: Session = Depends(get_session)
+):
+    api = session.get(ApiProbe, id)
+    machine = session.get(MachineNode, api.machine_id) if api else None
+    tcp_ok = (machine.current_status != "OFFLINE") if machine else True
+    tcp_latency = machine.last_tcp_latency_ms if machine else None
+
+    records = session.exec(
+        select(ApiProbeHistory)
+        .where(ApiProbeHistory.api_probe_id == id)
+        .order_by(ApiProbeHistory.probed_at.desc())
+        .limit(limit)
+    ).all()
+
+    # 如果 ApiProbeHistory 为空，尝试查找同名的 MonitorTarget 历史记录
+    if not records:
+        target = None
+        if api:
+            target = session.exec(select(MonitorTarget).where(MonitorTarget.name == api.name)).first()
+        if not target:
+            target = session.get(MonitorTarget, id)
+        if target:
+            target_records = session.exec(
+                select(ProbeHistory)
+                .where(ProbeHistory.target_id == target.id)
+                .order_by(ProbeHistory.probed_at.desc())
+                .limit(limit)
+            ).all()
+            if target_records:
+                return [
+                    {
+                        "id": r.id,
+                        "probed_at": r.probed_at.isoformat() if r.probed_at else None,
+                        "tcp_ok": r.tcp_ok,
+                        "tcp_latency_ms": r.tcp_latency_ms,
+                        "http_status_code": r.http_status_code,
+                        "http_latency_ms": r.http_latency_ms,
+                        "schema_matched": r.schema_matched,
+                        "schema_diff_detail": r.schema_diff_detail,
+                        "raw_response_snippet": r.raw_response_snippet,
+                        "is_healthy": r.is_healthy,
+                        "circuit_broken": False
+                    }
+                    for r in target_records
+                ]
+
+    res = []
+    for r in records:
+        res.append({
+            "id": r.id,
+            "api_probe_id": r.api_probe_id,
+            "machine_id": r.machine_id,
+            "circuit_broken": r.circuit_broken,
+            "tcp_ok": False if r.circuit_broken else tcp_ok,
+            "tcp_latency_ms": None if r.circuit_broken else tcp_latency,
+            "http_status_code": r.http_status_code,
+            "http_latency_ms": r.http_latency_ms,
+            "schema_matched": r.schema_matched,
+            "schema_diff_detail": r.schema_diff_detail,
+            "raw_response_snippet": r.raw_response_snippet,
+            "is_healthy": r.is_healthy,
+            "probed_at": r.probed_at.isoformat() if r.probed_at else None
+        })
+    return res
 
 
 # ==========================================================
@@ -951,7 +1045,7 @@ def get_metrics_by_target(target_id: int):
     return get_target_metrics(target_id)
 
 
-@app.get("/api/targets/{target_id}/history", response_model=List[ProbeHistory])
+@app.get("/api/targets/{target_id}/history")
 def get_target_history(
     target_id: int,
     limit: int = 50,
@@ -964,4 +1058,56 @@ def get_target_history(
         .order_by(ProbeHistory.probed_at.desc())
         .limit(limit)
     ).all()
-    return records
+
+    if records:
+        return [
+            {
+                "id": r.id,
+                "target_id": r.target_id,
+                "probed_at": r.probed_at.isoformat() if r.probed_at else None,
+                "tcp_ok": r.tcp_ok,
+                "tcp_latency_ms": r.tcp_latency_ms,
+                "http_status_code": r.http_status_code,
+                "http_latency_ms": r.http_latency_ms,
+                "schema_matched": r.schema_matched,
+                "schema_diff_detail": r.schema_diff_detail,
+                "raw_response_snippet": r.raw_response_snippet,
+                "is_healthy": r.is_healthy,
+                "circuit_broken": False
+            }
+            for r in records
+        ]
+
+    # 如果 ProbeHistory 为空，尝试在 ApiProbeHistory 中查找
+    t = session.get(MonitorTarget, target_id)
+    api = session.exec(select(ApiProbe).where(ApiProbe.name == t.name)).first() if t else None
+    if not api:
+        api = session.get(ApiProbe, target_id)
+    if api:
+        machine = session.get(MachineNode, api.machine_id) if api else None
+        tcp_ok = (machine.current_status != "OFFLINE") if machine else True
+        tcp_lat = machine.last_tcp_latency_ms if machine else None
+        api_records = session.exec(
+            select(ApiProbeHistory)
+            .where(ApiProbeHistory.api_probe_id == api.id)
+            .order_by(ApiProbeHistory.probed_at.desc())
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "id": r.id,
+                "target_id": target_id,
+                "probed_at": r.probed_at.isoformat() if r.probed_at else None,
+                "circuit_broken": r.circuit_broken,
+                "tcp_ok": False if r.circuit_broken else tcp_ok,
+                "tcp_latency_ms": None if r.circuit_broken else tcp_lat,
+                "http_status_code": r.http_status_code,
+                "http_latency_ms": r.http_latency_ms,
+                "schema_matched": r.schema_matched,
+                "schema_diff_detail": r.schema_diff_detail,
+                "raw_response_snippet": r.raw_response_snippet,
+                "is_healthy": r.is_healthy
+            }
+            for r in api_records
+        ]
+    return []
