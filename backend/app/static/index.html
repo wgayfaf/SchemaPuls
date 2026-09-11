@@ -490,19 +490,6 @@
                             <span>接口管理</span>
                             <span class="sub-badge">{{ apiList.length }}</span>
                         </el-menu-item>
-                        <el-menu-item index="targets:ALL">
-                            <i class="fa-solid fa-globe menu-icon" style="color: #60a5fa;"></i>
-                            <span>全部环境节点</span>
-                            <span class="sub-badge">{{ targets.length }}</span>
-                        </el-menu-item>
-                        <el-menu-item 
-                            v-for="grp in groupList" 
-                            :key="grp.name" 
-                            :index="'targets:' + grp.name">
-                            <i class="fa-solid fa-cubes menu-icon" :style="{ color: getGroupColor(grp.name) }"></i>
-                            <span>{{ grp.name }}</span>
-                            <span class="sub-badge" :class="{ danger: grp.down > 0 }">{{ grp.total }}</span>
-                        </el-menu-item>
                     </el-sub-menu>
 
                     <!-- 一级功能模块 (含二级子菜单): 排障与契约实验室 -->

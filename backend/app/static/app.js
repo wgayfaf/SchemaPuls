@@ -475,9 +475,10 @@ const app = createApp({
         };
 
         const goToEnvTargets = (envName) => {
-            currentNav.value = "targets";
-            selectedGroup.value = envName;
-            activeMenuKey.value = `targets:${envName}`;
+            currentNav.value = "api_management";
+            selectedApiEnv.value = envName;
+            selectedApiMachine.value = "ALL";
+            activeMenuKey.value = "api_management";
         };
 
         const getEnvTargetCount = (envName) => {
@@ -610,14 +611,14 @@ const app = createApp({
         };
 
         const goToMachineTargets = (row) => {
-            currentNav.value = "targets";
+            currentNav.value = "api_management";
             if (row.environment_name) {
-                selectedGroup.value = row.environment_name;
-                activeMenuKey.value = `targets:${row.environment_name}`;
+                selectedApiEnv.value = row.environment_name;
             } else {
-                selectedGroup.value = "ALL";
-                activeMenuKey.value = "targets:ALL";
+                selectedApiEnv.value = "ALL";
             }
+            selectedApiMachine.value = row.id;
+            activeMenuKey.value = "api_management";
         };
 
         // 接口管理 CRUD 与拨测
