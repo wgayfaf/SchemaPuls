@@ -564,6 +564,40 @@ def create_target(target: MonitorTarget, session: Session = Depends(get_session)
     return target
 
 
+@app.get("/api/targets/{target_id}", response_model=MonitorTarget)
+def get_target(target_id: int, session: Session = Depends(get_session)):
+    target = session.get(MonitorTarget, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    return target
+
+
+@app.put("/api/targets/{target_id}", response_model=MonitorTarget)
+def update_target(
+    target_id: int,
+    data: MonitorTarget,
+    session: Session = Depends(get_session)
+):
+    target = session.get(MonitorTarget, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    target.name = data.name
+    target.group_name = data.group_name
+    target.host = data.host
+    target.port = data.port
+    target.http_path = data.http_path
+    target.http_method = data.http_method
+    target.cron_interval_minutes = data.cron_interval_minutes
+    target.expected_schema = data.expected_schema
+    target.email_receivers = data.email_receivers
+    target.is_active = data.is_active
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    add_target_job(target)
+    return target
+
+
 @app.delete("/api/targets/{target_id}")
 def delete_target(target_id: int, session: Session = Depends(get_session)):
     target = session.get(MonitorTarget, target_id)

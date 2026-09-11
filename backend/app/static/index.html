@@ -676,13 +676,16 @@
                                     <span v-else style="color: var(--text-muted); font-size: 12px;">0</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="220" align="center" fixed="right">
+                            <el-table-column label="操作" width="280" align="center" fixed="right">
                                 <template #default="{ row }">
                                     <el-button size="small" type="success" plain :loading="triggeringId === row.id" @click="handleTrigger(row)">
                                         <i class="fa-solid fa-play" style="margin-right: 4px;"></i>探测
                                     </el-button>
                                     <el-button size="small" type="primary" plain @click="openMetricsDrawer(row)">
                                         <i class="fa-solid fa-chart-simple" style="margin-right: 4px;"></i>时序
+                                    </el-button>
+                                    <el-button size="small" type="primary" plain @click="openEditDialog(row)">
+                                        <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
                                     </el-button>
                                     <el-popconfirm title="确定删除该监控目标吗？" @confirm="handleDelete(row.id)">
                                         <template #reference>
@@ -814,8 +817,8 @@ export SMTP_USE_SSL="true"
             </div>
         </main>
 
-        <!-- 新增目标对话框 -->
-        <el-dialog v-model="createDialogVisible" title="新建监控目标" width="760px" destroy-on-close>
+        <!-- 新增/编辑目标对话框 -->
+        <el-dialog v-model="createDialogVisible" :title="editingTargetId ? '编辑监控目标' : '新建监控目标'" width="760px" destroy-on-close>
             <el-form :model="form" label-width="120px">
                 <el-row :gutter="16">
                     <el-col :span="12">
@@ -886,7 +889,9 @@ export SMTP_USE_SSL="true"
 
             <template #footer>
                 <el-button @click="createDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="submitCreateTarget" :loading="submitting">保存并启动监控</el-button>
+                <el-button type="primary" @click="submitCreateTarget" :loading="submitting">
+                    {{ editingTargetId ? '保存修改' : '保存并启动监控' }}
+                </el-button>
             </template>
         </el-dialog>
 

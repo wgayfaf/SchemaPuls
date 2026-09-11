@@ -20,6 +20,7 @@ const app = createApp({
 
         const triggeringId = ref(null);
         const createDialogVisible = ref(false);
+        const editingTargetId = ref(null);
         const submitting = ref(false);
         const inferring = ref(false);
 
@@ -215,6 +216,46 @@ const app = createApp({
         };
 
         const openCreateDialog = () => {
+            editingTargetId.value = null;
+            form.value = {
+                name: "",
+                group_name: selectedGroup.value !== "ALL" ? selectedGroup.value : "生产环境",
+                host: "",
+                port: 80,
+                http_path: "/get",
+                http_method: "GET",
+                cron_interval_minutes: 5,
+                email_input: "admin@company.com",
+                schema_text: JSON.stringify({
+                    type: "object",
+                    required: ["headers", "origin", "url"],
+                    properties: {
+                        origin: { type: "string" },
+                        url: { type: "string" },
+                        headers: { type: "object" }
+                    }
+                }, null, 2)
+            };
+            sampleJsonText.value = "";
+            createDialogVisible.value = true;
+        };
+
+        const openEditDialog = (row) => {
+            editingTargetId.value = row.id;
+            form.value = {
+                name: row.name || "",
+                group_name: row.group_name || "生产环境",
+                host: row.host || "",
+                port: row.port || 80,
+                http_path: row.http_path || "/get",
+                http_method: row.http_method || "GET",
+                cron_interval_minutes: row.cron_interval_minutes || 5,
+                email_input: (row.email_receivers && Array.isArray(row.email_receivers))
+                    ? row.email_receivers.join(", ")
+                    : (row.email_receivers || ""),
+                schema_text: row.expected_schema ? JSON.stringify(row.expected_schema, null, 2) : "{}"
+            };
+            sampleJsonText.value = "";
             createDialogVisible.value = true;
         };
 
@@ -298,26 +339,34 @@ const app = createApp({
                 ? form.value.email_input.split(/[,;，；\s]+/).filter(Boolean)
                 : [];
 
+            const payload = {
+                name: form.value.name,
+                group_name: form.value.group_name || "生产环境",
+                host: form.value.host,
+                port: form.value.port,
+                http_path: form.value.http_path,
+                http_method: form.value.http_method,
+                cron_interval_minutes: form.value.cron_interval_minutes,
+                expected_schema: parsedSchema,
+                email_receivers: receivers,
+                retry_threshold: 3,
+                silence_minutes: 30,
+                is_active: true
+            };
+
             submitting.value = true;
             try {
-                await axios.post("/api/targets", {
-                    name: form.value.name,
-                    group_name: form.value.group_name || "生产环境",
-                    host: form.value.host,
-                    port: form.value.port,
-                    http_path: form.value.http_path,
-                    http_method: form.value.http_method,
-                    cron_interval_minutes: form.value.cron_interval_minutes,
-                    expected_schema: parsedSchema,
-                    email_receivers: receivers,
-                    retry_threshold: 3,
-                    silence_minutes: 30
-                });
-                ElementPlus.ElMessage.success("监控目标创建成功，后台定时调度引擎已接管！");
+                if (editingTargetId.value) {
+                    await axios.put(`/api/targets/${editingTargetId.value}`, payload);
+                    ElementPlus.ElMessage.success("监控目标已更新！");
+                } else {
+                    await axios.post("/api/targets", payload);
+                    ElementPlus.ElMessage.success("监控目标创建成功，后台定时调度引擎已接管！");
+                }
                 createDialogVisible.value = false;
                 await fetchData();
             } catch (err) {
-                ElementPlus.ElMessage.error("创建失败: " + (err.response?.data?.detail || err.message));
+                ElementPlus.ElMessage.error((editingTargetId.value ? "更新失败: " : "创建失败: ") + (err.response?.data?.detail || err.message));
             } finally {
                 submitting.value = false;
             }
@@ -506,6 +555,8 @@ const app = createApp({
             handleTrigger,
             handleDelete,
             openCreateDialog,
+            openEditDialog,
+            editingTargetId,
             handleInferSchema,
             submitCreateTarget,
             openMetricsDrawer,
