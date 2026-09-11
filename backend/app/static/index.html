@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SchemaPulse - 工业级服务健康与契约监控工作台</title>
+    <!-- Element Plus CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus@2.6.3/dist/index.min.css">
+    <!-- Font Awesome 图标库 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
+    <style>
+        :root {
+            /* 沉稳实用工业基调：淡蓝、纯白、深海蓝 */
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --primary-light: #eff6ff;
+            --primary-border: #bfdbfe;
+            --sidebar-bg: #f8fbfe;
+            --sidebar-border: #dbe5f0;
+            --sidebar-width: 240px;
+            --header-height: 56px;
+            --bg-workspace: #f0f4f9;
+            --card-bg: #ffffff;
+            --card-border: #dbe5f0;
+            --card-hover-border: #bfdbfe;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-light: #64748b;
+            --success: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-workspace);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #app {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* ================= 沉稳实用工业风左侧边栏 (Sidebar) ================= */
+        .workbench-sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--sidebar-border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            user-select: none;
+            z-index: 10;
+            box-shadow: 1px 0 4px rgba(37, 99, 235, 0.03);
+        }
+
+        .sidebar-brand {
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            padding: 0 18px;
+            gap: 10px;
+            border-bottom: 1px solid var(--sidebar-border);
+            background: linear-gradient(180deg, #f0f7ff 0%, #f8fbfe 100%);
+        }
+
+        .brand-icon {
+            font-size: 19px;
+            color: var(--primary);
+        }
+
+        .brand-title {
+            font-weight: 700;
+            font-size: 16px;
+            letter-spacing: -0.2px;
+            color: #0f172a;
+        }
+
+        .brand-badge {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-weight: 700;
+            margin-left: auto;
+            border: 1px solid var(--primary-border);
+        }
+
+        /* ================= vue-element-admin 风格侧边栏菜单定制 (淡蓝与纯白基调) ================= */
+        .el-menu.vue-admin-menu {
+            border-right: none !important;
+            background-color: transparent !important;
+            width: 100%;
+        }
+
+        .vue-admin-menu .el-menu-item {
+            height: 44px !important;
+            line-height: 44px !important;
+            font-size: 13.5px !important;
+            color: #334155 !important;
+            font-weight: 500;
+            margin: 2px 8px;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+            display: flex !important;
+            align-items: center !important;
+        }
+
+        .vue-admin-menu .el-sub-menu__title {
+            height: 44px !important;
+            line-height: 44px !important;
+            font-size: 13.5px !important;
+            color: #334155 !important;
+            font-weight: 600;
+            margin: 2px 8px;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+        }
+
+        .vue-admin-menu .el-menu-item:hover,
+        .vue-admin-menu .el-sub-menu__title:hover {
+            background-color: #eff6ff !important;
+            color: #1d4ed8 !important;
+        }
+
+        /* 选中激活状态 (工控深海蓝 + 淡蓝底色) */
+        .vue-admin-menu .el-menu-item.is-active {
+            background-color: #e0edfe !important;
+            color: #1e40af !important;
+            font-weight: 600;
+            border-left: 3.5px solid var(--primary);
+            border-radius: 0 6px 6px 0;
+        }
+
+        /* 二级子菜单背景 */
+        .vue-admin-menu .el-sub-menu .el-menu {
+            background-color: #f4f8fd !important;
+            padding: 3px 0;
+        }
+
+        .vue-admin-menu .el-sub-menu .el-menu-item {
+            height: 38px !important;
+            line-height: 38px !important;
+            font-size: 13px !important;
+            padding-left: 46px !important;
+            margin: 2px 8px;
+            border-radius: 5px;
+        }
+
+        .vue-admin-menu .el-sub-menu .el-menu-item.is-active {
+            background-color: #e0edfe !important;
+            color: #1e40af !important;
+            font-weight: 600;
+        }
+
+        .menu-icon {
+            font-size: 14px;
+            width: 18px;
+            margin-right: 8px;
+            text-align: center;
+            color: #64748b;
+        }
+
+        .vue-admin-menu .el-menu-item.is-active .menu-icon,
+        .vue-admin-menu .el-sub-menu.is-active > .el-sub-menu__title .menu-icon {
+            color: var(--primary) !important;
+        }
+
+        .sub-badge {
+            margin-left: auto;
+            font-size: 11px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #475569;
+            border: 1px solid var(--sidebar-border);
+        }
+
+        .sub-badge.danger {
+            background: #fef2f2;
+            color: #dc2626;
+            border-color: #fecaca;
+            font-weight: 600;
+        }
+
+        /* 侧边栏底部信息 */
+        .sidebar-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--sidebar-border);
+            font-size: 11px;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #f4f8fd;
+        }
+
+        .pulse-indicator {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--success);
+            margin-right: 6px;
+        }
+
+        /* ================= 右侧主工作区 (Main Workspace) ================= */
+        .workbench-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-color: var(--bg-workspace);
+        }
+
+        /* 顶部 Header */
+        .workbench-header {
+            height: var(--header-height);
+            border-bottom: 1px solid var(--sidebar-border);
+            background: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.03);
+        }
+
+        .header-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13.5px;
+            color: #64748b;
+        }
+
+        .header-breadcrumb b {
+            color: #0f172a;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 工作区主体容器 (可滚动) */
+        .workbench-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px 36px;
+        }
+
+        /* 统一卡片 - 纯白基底 + 柔和浅蓝描边 */
+        .wb-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 20px 24px;
+            margin-bottom: 18px;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.04);
+        }
+
+        /* KPI 网格 - 沉稳工控仪表卡 */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .kpi-box {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-top: 3px solid var(--primary);
+            border-radius: 8px;
+            padding: 16px 20px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.04);
+            transition: all 0.15s;
+        }
+
+        .kpi-box.kpi-success {
+            border-top-color: #059669;
+        }
+
+        .kpi-box.kpi-danger {
+            border-top-color: #dc2626;
+        }
+
+        .kpi-box.kpi-info {
+            border-top-color: #0284c7;
+        }
+
+        .kpi-box:hover {
+            border-color: #bfdbfe;
+            box-shadow: 0 4px 8px -2px rgba(37, 99, 235, 0.08);
+        }
+
+        .kpi-num {
+            font-size: 26px;
+            font-weight: 700;
+            margin-top: 6px;
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+            color: #0f172a;
+        }
+
+        /* 覆盖 Element Plus 样式 - 沉稳淡蓝与白色工控风 */
+        .el-table {
+            --el-table-bg-color: #ffffff !important;
+            --el-table-tr-bg-color: #ffffff !important;
+            --el-table-header-bg-color: #f1f6fc !important;
+            --el-table-border-color: #dbe5f0 !important;
+            --el-table-text-color: #1e293b !important;
+            --el-table-header-text-color: #334155 !important;
+            --el-table-row-hover-bg-color: #f1f7fe !important;
+            font-size: 13px !important;
+        }
+
+        .el-dialog, .el-drawer {
+            background: #ffffff !important;
+            border: 1px solid #dbe5f0 !important;
+            color: #0f172a !important;
+        }
+
+        .el-dialog__title, .el-drawer__header {
+            color: #0f172a !important;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .el-form-item__label {
+            color: #334155 !important;
+            font-size: 13px;
+        }
+
+        .el-input__wrapper, .el-textarea__inner {
+            background-color: #ffffff !important;
+            box-shadow: 0 0 0 1px #cbd5e1 inset !important;
+            color: #0f172a !important;
+        }
+
+        .el-input__wrapper:hover, .el-textarea__inner:hover {
+            box-shadow: 0 0 0 1px #94a3b8 inset !important;
+        }
+
+        .el-input__wrapper.is-focus, .el-textarea__inner:focus {
+            box-shadow: 0 0 0 1px #2563eb inset, 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+        }
+
+        .code-pill {
+            font-family: 'Fira Code', Consolas, Monaco, monospace;
+            background: #f1f6fc;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #0369a1;
+            border: 1px solid #dbe5f0;
+        }
+
+        /* 状态指示 Tag (沉稳实用、工控清晰) */
+        .status-badge {
+            font-weight: 600;
+            border-radius: 4px;
+            padding: 2px 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11.5px;
+        }
+        .status-badge.healthy { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+        .status-badge.down { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .status-badge.degraded { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+        .status-badge.unknown { background: #f1f5f9; color: #64748b; border: 1px solid #dbe5f0; }
+
+        /* 延迟耗时标签 (清晰工控数显) */
+        .latency-badge {
+            font-weight: 600;
+            font-size: 11.5px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-family: 'Fira Code', Consolas, Monaco, monospace;
+        }
+        .latency-badge.fast {
+            background: #ecfdf5;
+            color: #059669;
+            border: 1px solid #a7f3d0;
+        }
+        .latency-badge.normal {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+        }
+        .latency-badge.slow {
+            background: #fffbeb;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
+        .latency-badge.unknown {
+            background: #f1f5f9;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+        }
+
+        /* 环境标签选单 (沉稳淡蓝基底) */
+        .group-tab-btn {
+            background-color: #ffffff;
+            border: 1px solid #dbe5f0;
+            color: #475569;
+            transition: all 0.15s;
+        }
+        .group-tab-btn:hover {
+            background-color: #f1f7fe;
+            color: #1d4ed8;
+            border-color: #bfdbfe;
+        }
+        .group-tab-btn.active {
+            background-color: #eff6ff;
+            color: #1d4ed8;
+            border-color: #93c5fd;
+            font-weight: 600;
+        }
+
+        #chartContainer {
+            width: 100%;
+            height: 320px;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- ================= 工业级左侧导航菜单 ================= -->
+        <aside class="workbench-sidebar">
+            <div class="sidebar-brand">
+                <i class="fa-solid fa-satellite-dish brand-icon"></i>
+                <span class="brand-title">SchemaPulse</span>
+                <span class="brand-badge">PRO</span>
+            </div>
+
+            <div style="flex: 1; overflow-y: auto; padding: 6px 0;">
+                <el-menu 
+                    :default-active="activeMenuKey" 
+                    :default-openeds="['topology_group', 'tools_group', 'settings_group']"
+                    class="vue-admin-menu" 
+                    @select="handleMenuSelect">
+
+                    <!-- 一级主菜单: 监控大盘 -->
+                    <el-menu-item index="dashboard">
+                        <i class="fa-solid fa-gauge-high menu-icon"></i>
+                        <span>全局监控大盘</span>
+                    </el-menu-item>
+
+                    <!-- 一级功能模块 (含二级子菜单): 服务监控拓扑 -->
+                    <el-sub-menu index="topology_group">
+                        <template #title>
+                            <i class="fa-solid fa-network-wired menu-icon"></i>
+                            <span>服务监控拓扑</span>
+                        </template>
+                        <el-menu-item index="targets:ALL">
+                            <i class="fa-solid fa-globe menu-icon" style="color: #60a5fa;"></i>
+                            <span>全部环境节点</span>
+                            <span class="sub-badge">{{ targets.length }}</span>
+                        </el-menu-item>
+                        <el-menu-item 
+                            v-for="grp in groupList" 
+                            :key="grp.name" 
+                            :index="'targets:' + grp.name">
+                            <i class="fa-solid fa-cubes menu-icon" :style="{ color: getGroupColor(grp.name) }"></i>
+                            <span>{{ grp.name }}</span>
+                            <span class="sub-badge" :class="{ danger: grp.down > 0 }">{{ grp.total }}</span>
+                        </el-menu-item>
+                    </el-sub-menu>
+
+                    <!-- 一级功能模块 (含二级子菜单): 排障与契约实验室 -->
+                    <el-sub-menu index="tools_group">
+                        <template #title>
+                            <i class="fa-solid fa-screwdriver-wrench menu-icon"></i>
+                            <span>排障与实验室</span>
+                        </template>
+                        <el-menu-item index="schema_lab">
+                            <i class="fa-solid fa-flask-vial menu-icon" style="color: #a855f7;"></i>
+                            <span>Schema 契约实验室</span>
+                        </el-menu-item>
+                        <el-menu-item index="incidents">
+                            <i class="fa-solid fa-triangle-exclamation menu-icon" style="color: #ef4444;"></i>
+                            <span>故障告警排障中心</span>
+                            <span v-if="(summary.down_count || 0) > 0" class="sub-badge danger">{{ summary.down_count }}</span>
+                        </el-menu-item>
+                    </el-sub-menu>
+
+                    <!-- 一级功能模块 (含二级子菜单): 系统与配置 -->
+                    <el-sub-menu index="settings_group">
+                        <template #title>
+                            <i class="fa-solid fa-sliders menu-icon"></i>
+                            <span>系统配置支持</span>
+                        </template>
+                        <el-menu-item index="settings">
+                            <i class="fa-solid fa-envelope-open-text menu-icon" style="color: #10b981;"></i>
+                            <span>SMTP 告警配置</span>
+                        </el-menu-item>
+                        <el-menu-item index="docs">
+                            <i class="fa-solid fa-book-open menu-icon" style="color: #6366f1;"></i>
+                            <span>Swagger API 文档</span>
+                        </el-menu-item>
+                    </el-sub-menu>
+                </el-menu>
+            </div>
+
+            <div class="sidebar-footer">
+                <div><span class="pulse-indicator"></span>引擎在线中</div>
+                <div>v1.0.0</div>
+            </div>
+        </aside>
+
+        <!-- ================= 右侧主工作区 ================= -->
+        <main class="workbench-main">
+            <!-- 顶部 Header -->
+            <header class="workbench-header">
+                <div class="header-breadcrumb">
+                    <i class="fa-solid fa-terminal" style="color: var(--primary);"></i>
+                    <span>工作区</span>
+                    <span>/</span>
+                    <b>{{ navTitle }}</b>
+                    <span v-if="currentNav === 'targets'">
+                        / <el-tag size="small" :type="getGroupTagType(selectedGroup)" effect="light">{{ selectedGroup === 'ALL' ? '全部环境' : selectedGroup }}</el-tag>
+                    </span>
+                </div>
+
+                <div class="header-actions">
+                    <el-button type="info" size="small" text @click="openDocs">
+                        <i class="fa-solid fa-book-open" style="margin-right: 6px;"></i>Swagger 接口
+                    </el-button>
+                    <el-button type="primary" size="small" plain @click="fetchData" :loading="loading">
+                        <i class="fa-solid fa-arrows-rotate" style="margin-right: 6px;"></i>刷新
+                    </el-button>
+                    <el-button type="primary" size="small" @click="openCreateDialog">
+                        <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建监控目标
+                    </el-button>
+                </div>
+            </header>
+
+            <!-- 工作区各功能视图 (根据 currentNav 动态切换) -->
+            <div class="workbench-content">
+
+                <!-- 视图 1: 全局监控大盘 (Dashboard) -->
+                <div v-show="currentNav === 'dashboard'">
+                    <div class="kpi-grid">
+                        <div class="kpi-box">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">托管节点总数</div>
+                            <div class="kpi-num">{{ summary.total_targets || 0 }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
+                        </div>
+                        <div class="kpi-box kpi-success">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">正常运行节点</div>
+                            <div class="kpi-num" style="color: #059669;">{{ summary.healthy_count || 0 }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
+                        </div>
+                        <div class="kpi-box kpi-danger">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">故障与降级节点</div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ (summary.down_count || 0) + (summary.degraded_count || 0) }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Down</span></div>
+                        </div>
+                        <div class="kpi-box kpi-info">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">24H SLA 可用率</div>
+                            <div class="kpi-num" style="color: #0284c7;">{{ summary.sla_rate || 100 }}<span style="font-size: 12px; color: #64748b; font-weight: normal;">%</span></div>
+                        </div>
+                    </div>
+
+                    <div class="wb-card">
+                        <div style="font-weight: 600; font-size: 15px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; color: #0f172a;">
+                            <span><i class="fa-solid fa-layer-group" style="color: #2563eb; margin-right: 8px;"></i>各环境运行状态矩阵</span>
+                            <el-button size="small" type="primary" text @click="switchNav('targets')">进入详情工作台 →</el-button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px;">
+                            <div v-for="t in targets" :key="t.id" class="kpi-box" style="padding: 16px; cursor: pointer;" @click="openMetricsDrawer(t)">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <el-tag size="small" :type="getGroupTagType(t.group_name)">{{ t.group_name }}</el-tag>
+                                    <span :class="getStatusBadgeClass(t.current_status)">{{ t.current_status }}</span>
+                                </div>
+                                <div style="font-weight: 600; font-size: 14px; color: #0f172a; margin-bottom: 4px;">{{ t.name }}</div>
+                                <div class="code-pill" style="font-size: 11px; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    {{ t.host }}:{{ t.port }}{{ t.http_path }}
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 8px; padding: 4px 8px; background: #f8fbfe; border-radius: 4px; border: 1px solid #e2eafd;">
+                                    <span style="color: #64748b;"><i class="fa-solid fa-stopwatch" style="margin-right: 4px; color: #3b82f6;"></i>请求延迟:</span>
+                                    <span :class="getLatencyBadgeClass(t.last_latency_ms)">
+                                        {{ formatLatency(t.last_latency_ms) }}
+                                    </span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted);">
+                                    <span>周期: {{ t.cron_interval_minutes }}m</span>
+                                    <span style="color: #2563eb;"><i class="fa-solid fa-chart-line" style="margin-right: 4px;"></i>点击看时序</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 视图 2: 环境与服务拨测工作台 (Targets) -->
+                <div v-show="currentNav === 'targets'">
+                    <div class="wb-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 15px; font-weight: 600; color: #0f172a;">接口健康探测列表</span>
+                                <el-tag size="small" type="info" effect="plain">{{ filteredTargets.length }} 项</el-tag>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <el-radio-group v-model="selectedGroup" size="small">
+                                    <el-radio-button label="ALL">全部环境</el-radio-button>
+                                    <el-radio-button v-for="g in groupList" :key="g.name" :label="g.name">{{ g.name }}</el-radio-button>
+                                </el-radio-group>
+                            </div>
+                        </div>
+
+                        <el-table :data="filteredTargets" v-loading="loading" style="width: 100%">
+                            <el-table-column prop="id" label="ID" width="60" align="center"></el-table-column>
+                            <el-table-column label="所属环境" width="130">
+                                <template #default="{ row }">
+                                    <el-tag size="small" :type="getGroupTagType(row.group_name)" effect="light" style="font-weight: 600;">
+                                        {{ row.group_name || '生产环境' }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="name" label="目标名称" min-width="170">
+                                <template #default="{ row }">
+                                    <div style="font-weight: 600; color: #0f172a;">{{ row.name }}</div>
+                                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                                        每 {{ row.cron_interval_minutes }} 分钟定时探活
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="探测目标 (Host:Port:Path)" min-width="250">
+                                <template #default="{ row }">
+                                    <span class="code-pill">{{ row.http_method }} {{ row.host }}:{{ row.port }}{{ row.http_path }}</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="最新延迟" width="135" align="center">
+                                <template #default="{ row }">
+                                    <div v-if="row.last_latency_ms !== null && row.last_latency_ms !== undefined">
+                                        <el-tooltip :content="'HTTP 响应: ' + (row.last_http_latency_ms ? row.last_http_latency_ms + 'ms' : '未发起') + ' | TCP 握手: ' + (row.last_tcp_latency_ms ? row.last_tcp_latency_ms + 'ms' : '失败')" placement="top">
+                                            <span :class="getLatencyBadgeClass(row.last_latency_ms)" style="cursor: pointer;">
+                                                <i class="fa-solid fa-bolt" style="font-size: 10px; margin-right: 3px;"></i>
+                                                {{ row.last_latency_ms }} ms
+                                            </span>
+                                        </el-tooltip>
+                                    </div>
+                                    <span v-else style="color: #94a3b8; font-size: 12px;">待探测</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="current_status" label="健康状态" width="130" align="center">
+                                <template #default="{ row }">
+                                    <span :class="getStatusBadgeClass(row.current_status)">
+                                        <i :class="getStatusIcon(row.current_status)"></i>
+                                        {{ row.current_status }}
+                                    </span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="consecutive_failures" label="连续失败" width="90" align="center">
+                                <template #default="{ row }">
+                                    <el-tag v-if="row.consecutive_failures > 0" type="danger" size="small" effect="plain">{{ row.consecutive_failures }} 次</el-tag>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">0</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="220" align="center" fixed="right">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="success" plain :loading="triggeringId === row.id" @click="handleTrigger(row)">
+                                        <i class="fa-solid fa-play" style="margin-right: 4px;"></i>探测
+                                    </el-button>
+                                    <el-button size="small" type="primary" plain @click="openMetricsDrawer(row)">
+                                        <i class="fa-solid fa-chart-simple" style="margin-right: 4px;"></i>时序
+                                    </el-button>
+                                    <el-popconfirm title="确定删除该监控目标吗？" @confirm="handleDelete(row.id)">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" plain>
+                                                <i class="fa-solid fa-trash-can"></i>
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+                </div>
+
+                <!-- 视图 3: Schema 契约实验室 (Schema Lab) -->
+                <div v-show="currentNav === 'schema_lab'">
+                    <div class="wb-card">
+                        <div style="font-size: 15px; font-weight: 600; margin-bottom: 8px; color: #0f172a;">
+                            <i class="fa-solid fa-flask-vial" style="margin-right: 8px; color: #2563eb;"></i>JSON Schema 契约生成与破坏性变更实验室
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+                            在此粘贴你业务接口返回的任意真实 JSON 数据，系统将利用反向结构推导引擎自动提取出标准的 Draft-7 JSON Schema，并支持开启严格模式（不允许额外未声明字段）。
+                        </p>
+
+                        <el-row :gutter="20">
+                            <el-col :span="12">
+                                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #334155;">
+                                    1. 粘贴真实接口 JSON 响应内容
+                                </div>
+                                <el-input 
+                                    v-model="labJsonInput" 
+                                    type="textarea" 
+                                    :rows="16" 
+                                    placeholder='{ "code": 200, "message": "ok", "data": { "uid": 123, "tags": ["admin"] } }'
+                                    style="font-family: monospace;">
+                                </el-input>
+                                <div style="margin-top: 14px; display: flex; align-items: center; justify-content: space-between;">
+                                    <el-checkbox v-model="labStrictMode" label="开启严格模式 (additionalProperties: false)"></el-checkbox>
+                                    <el-button type="primary" @click="handleLabInfer" :loading="labInferring">
+                                        <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 6px;"></i>执行 Schema 推导
+                                    </el-button>
+                                </div>
+                            </el-col>
+                            <el-col :span="12">
+                                <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #0369a1;">
+                                    2. 生成的标准 Draft-7 JSON Schema 规则
+                                </div>
+                                <el-input 
+                                    v-model="labSchemaOutput" 
+                                    type="textarea" 
+                                    :rows="16" 
+                                    readonly 
+                                    style="font-family: monospace;"
+                                    placeholder="点击左下方推导后在此实时呈现生成的结构...">
+                                </el-input>
+                                <div style="margin-top: 14px; text-align: right;">
+                                    <el-button type="primary" plain @click="copyLabSchema" :disabled="!labSchemaOutput">
+                                        <i class="fa-solid fa-copy" style="margin-right: 6px;"></i>复制 Schema 规则
+                                    </el-button>
+                                </div>
+                            </el-col>
+                        </el-row>
+                    </div>
+                </div>
+
+                <!-- 视图 4: 故障告警排障中心 (Incidents) -->
+                <div v-show="currentNav === 'incidents'">
+                    <div class="wb-card">
+                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #ef4444; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>故障告警排障中心 (当前异常节点清单)</span>
+                        </div>
+                        <div v-if="downTargets.length === 0" style="text-align: center; padding: 40px; color: #34d399;">
+                            <i class="fa-solid fa-circle-check" style="font-size: 48px; margin-bottom: 12px;"></i>
+                            <div style="font-size: 16px; font-weight: 600;">太棒了！当前没有任何异常节点</div>
+                            <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">所有托管服务均处于连通与 Schema 完全合规状态。</div>
+                        </div>
+                        <el-table v-else :data="downTargets" style="width: 100%">
+                            <el-table-column prop="group_name" label="环境" width="120">
+                                <template #default="{ row }">
+                                    <el-tag size="small" type="danger">{{ row.group_name }}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="name" label="故障目标" min-width="160"></el-table-column>
+                            <el-table-column label="地址" min-width="220">
+                                <template #default="{ row }"><span class="code-pill">{{ row.host }}:{{ row.port }}{{ row.http_path }}</span></template>
+                            </el-table-column>
+                            <el-table-column label="捕获延迟" width="120" align="center">
+                                <template #default="{ row }">
+                                    <span v-if="row.last_latency_ms" :class="getLatencyBadgeClass(row.last_latency_ms)">
+                                        {{ row.last_latency_ms }} ms
+                                    </span>
+                                    <span v-else style="color: #dc2626; font-size: 11.5px; font-weight: 600;">断开/超时</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="consecutive_failures" label="连续失败" width="100" align="center">
+                                <template #default="{ row }"><el-tag type="danger" effect="dark">{{ row.consecutive_failures }} 次</el-tag></template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="160" align="center">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="primary" @click="openMetricsDrawer(row)">排障诊断</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+                </div>
+
+                <!-- 视图 5: 系统设置 (Settings) -->
+                <div v-show="currentNav === 'settings'">
+                    <div class="wb-card">
+                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">
+                            <i class="fa-solid fa-envelope-open-text" style="color: #10b981; margin-right: 8px;"></i>SMTP 邮件与告警参数说明
+                        </div>
+                        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.8;">
+                            系统底层已内置全套异步非阻塞 SMTP 邮件发信服务与专业的富文本 HTML 告警卡片。<br>
+                            未配置系统环境变量时，产生的告警与恢复通告将在控制台自动进行真实格式模拟；<br>
+                            如需外发真实邮件，可在后端运行环境中设置如下环境变量：
+                        </p>
+                        <pre style="background: #f8fafc; padding: 14px; border-radius: 6px; font-size: 13px; color: #0369a1; margin: 16px 0; border: 1px solid #e2e8f0;">
+export SMTP_HOST="smtp.qq.com"
+export SMTP_PORT="465"
+export SMTP_USER="your_email@qq.com"
+export SMTP_PASSWORD="your_smtp_auth_token"
+export SMTP_USE_SSL="true"
+                        </pre>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- 新增目标对话框 -->
+        <el-dialog v-model="createDialogVisible" title="新建监控目标" width="760px" destroy-on-close>
+            <el-form :model="form" label-width="120px">
+                <el-row :gutter="16">
+                    <el-col :span="12">
+                        <el-form-item label="所属环境" required>
+                            <el-select v-model="form.group_name" filterable allow-create default-first-option placeholder="选择或直接输入新环境" style="width: 100%;">
+                                <el-option label="生产环境 (Prod)" value="生产环境"></el-option>
+                                <el-option label="预发布环境 (Staging)" value="预发布环境"></el-option>
+                                <el-option label="测试环境 (Testing)" value="测试环境"></el-option>
+                                <el-option label="开发环境 (Dev)" value="开发环境"></el-option>
+                                <el-option v-for="g in groupList" :key="g.name" :label="g.name" :value="g.name"></el-option>
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item label="目标名称" required>
+                            <el-input v-model="form.name" placeholder="例如: 认证中心服务"></el-input>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+
+                <el-row :gutter="16">
+                    <el-col :span="14">
+                        <el-form-item label="IP / 域名" required>
+                            <el-input v-model="form.host" placeholder="例如: httpbin.org 或 192.168.1.10"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="10">
+                        <el-form-item label="TCP 端口" required>
+                            <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%;"></el-input-number>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+
+                <el-row :gutter="16">
+                    <el-col :span="14">
+                        <el-form-item label="HTTP 路径">
+                            <el-input v-model="form.http_path" placeholder="/health 或 /get"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="10">
+                        <el-form-item label="周期(分钟)">
+                            <el-input-number v-model="form.cron_interval_minutes" :min="1" :max="1440" style="width: 100%;"></el-input-number>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+
+                <el-form-item label="告警邮箱">
+                    <el-input v-model="form.email_input" placeholder="多个邮箱用逗号分隔，例如: admin@company.com, ops@company.com"></el-input>
+                </el-form-item>
+
+                <!-- Schema 智能推导辅助卡片 (淡蓝底) -->
+                <div style="background: #f0f7ff; padding: 14px; border-radius: 6px; border: 1px dashed #bfdbfe; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 13px; font-weight: 600; color: #1d4ed8;">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 6px;"></i>从接口返回的真实 JSON 自动生成 Schema
+                        </span>
+                        <el-button size="small" type="primary" @click="handleInferSchema" :loading="inferring">
+                            一键生成 Draft-7 规则
+                        </el-button>
+                    </div>
+                    <el-input v-model="sampleJsonText" type="textarea" :rows="3" placeholder="在此粘贴真实的 JSON 响应片段..."></el-input>
+                </div>
+
+                <el-form-item label="预设 Schema" required>
+                    <el-input v-model="form.schema_text" type="textarea" :rows="6" style="font-family: monospace;"></el-input>
+                </el-form-item>
+            </el-form>
+
+            <template #footer>
+                <el-button @click="createDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitCreateTarget" :loading="submitting">保存并启动监控</el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 时序指标与日志排障抽屉 -->
+        <el-drawer v-model="drawerVisible" :title="activeTarget ? '时序排障报表 - ' + activeTarget.name : '时序排障'" size="65%">
+            <div v-if="activeTarget">
+                <div style="background: #ffffff; padding: 18px 20px; border-radius: 8px; border: 1px solid #dbe5f0; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(37,99,235,0.03);">
+                    <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; display: flex; justify-content: space-between; color: #0f172a;">
+                        <span><i class="fa-solid fa-chart-line" style="color: #2563eb; margin-right: 6px;"></i>网络握手与 HTTP 响应耗时趋势 (近24小时)</span>
+                        <el-tag size="small" :type="getGroupTagType(activeTarget.group_name)">{{ activeTarget.group_name }}</el-tag>
+                    </div>
+                    <div id="chartContainer"></div>
+                </div>
+
+                <div style="font-weight: 600; font-size: 14px; margin-bottom: 10px; color: #0f172a;">
+                    <i class="fa-solid fa-clock-rotate-left" style="color: #2563eb; margin-right: 6px;"></i>历史探测日志 (展开行查看破坏性变更明细)
+                </div>
+                <el-table :data="historyList" v-loading="loadingHistory" style="width: 100%" size="small">
+                    <el-table-column type="expand">
+                        <template #default="{ row }">
+                            <div style="padding: 12px 18px; background: #f4f8fd; border-radius: 6px; border: 1px solid #dbe5f0;">
+                                <div v-if="row.schema_diff_detail && row.schema_diff_detail.length" style="margin-bottom: 8px;">
+                                    <div style="font-weight: 600; color: #dc2626; margin-bottom: 6px;">⚠️ 捕获的破坏性结构变更：</div>
+                                    <div v-for="(err, idx) in row.schema_diff_detail" :key="idx" style="font-size: 12px; color: #b91c1c; margin-left: 10px;">
+                                        • <b>[{{ err.field }}]</b>: {{ err.message }}
+                                    </div>
+                                </div>
+                                <div v-else style="color: #059669; font-size: 12px; margin-bottom: 6px;">✓ Schema 结构完全符合预期。</div>
+                                <div v-if="row.raw_response_snippet" style="font-size: 11px; color: var(--text-muted);">
+                                    <div>原始响应现场快照：</div>
+                                    <pre style="margin-top: 4px; padding: 6px; background: #ffffff; border: 1px solid #dbe5f0; border-radius: 4px; color: #1e293b; overflow-x: auto;">{{ row.raw_response_snippet }}</pre>
+                                </div>
+                            </div>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="probed_at" label="检测时间" width="160">
+                        <template #default="{ row }">{{ formatTime(row.probed_at) }}</template>
+                    </el-table-column>
+                    <el-table-column label="TCP 握手" width="105" align="center">
+                        <template #default="{ row }">
+                            <span v-if="row.tcp_ok" style="color: #059669; font-weight: 500;">✓ {{ row.tcp_latency_ms }}ms</span>
+                            <span v-else style="color: #dc2626; font-weight: 500;">✗ 失败</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="HTTP 状态" width="100" align="center">
+                        <template #default="{ row }">
+                            <el-tag v-if="row.http_status_code === 200" type="success" size="small">{{ row.http_status_code }} OK</el-tag>
+                            <el-tag v-else-if="row.http_status_code" type="danger" size="small">{{ row.http_status_code }}</el-tag>
+                            <span v-else style="color: var(--text-muted);">-</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="HTTP 耗时" width="110" align="center">
+                        <template #default="{ row }">
+                            <span v-if="row.http_latency_ms" :class="getLatencyBadgeClass(row.http_latency_ms)">
+                                {{ row.http_latency_ms }} ms
+                            </span>
+                            <span v-else style="color: var(--text-muted); font-size: 12px;">-</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="Schema 状态" width="115" align="center">
+                        <template #default="{ row }">
+                            <el-tag v-if="row.schema_matched" type="success" size="small">完全匹配</el-tag>
+                            <el-tag v-else type="danger" size="small">破坏性突变</el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="综合状态" width="100" align="center">
+                        <template #default="{ row }">
+                            <span v-if="row.is_healthy" style="color: #059669; font-weight: 600;">HEALTHY</span>
+                            <span v-else style="color: #dc2626; font-weight: 600;">FAIL</span>
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
+        </el-drawer>
+    </div>
+
+    <!-- 基础脚本依赖 -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/element-plus@2.6.3/dist/index.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
