@@ -474,6 +474,11 @@
                             <i class="fa-solid fa-network-wired menu-icon"></i>
                             <span>服务监控拓扑</span>
                         </template>
+                        <el-menu-item index="env_management">
+                            <i class="fa-solid fa-layer-group menu-icon" style="color: #0284c7;"></i>
+                            <span>环境管理</span>
+                            <span class="sub-badge">{{ environmentList.length }}</span>
+                        </el-menu-item>
                         <el-menu-item index="targets:ALL">
                             <i class="fa-solid fa-globe menu-icon" style="color: #60a5fa;"></i>
                             <span>全部环境节点</span>
@@ -551,7 +556,10 @@
                     <el-button type="primary" size="small" plain @click="fetchData" :loading="loading">
                         <i class="fa-solid fa-arrows-rotate" style="margin-right: 6px;"></i>刷新
                     </el-button>
-                    <el-button type="primary" size="small" @click="openCreateDialog">
+                    <el-button v-if="currentNav === 'env_management'" type="primary" size="small" @click="openCreateEnvDialog">
+                        <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建环境
+                    </el-button>
+                    <el-button v-else type="primary" size="small" @click="openCreateDialog">
                         <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建监控目标
                     </el-button>
                 </div>
@@ -608,6 +616,111 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- 视图: 环境管理 (Environment Management) -->
+                <div v-show="currentNav === 'env_management'">
+                    <!-- 顶部环境与节点指标卡片 -->
+                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
+                        <div class="kpi-box">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">托管环境总数</div>
+                            <div class="kpi-num">{{ environmentList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Envs</span></div>
+                        </div>
+                        <div class="kpi-box kpi-info">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">纳管监控节点</div>
+                            <div class="kpi-num" style="color: #0284c7;">{{ targets.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
+                        </div>
+                        <div class="kpi-box kpi-success">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">正常运行服务</div>
+                            <div class="kpi-num" style="color: #059669;">{{ summary.healthy_count || 0 }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
+                        </div>
+                        <div class="kpi-box kpi-danger">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">告警与降级节点</div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ (summary.down_count || 0) + (summary.degraded_count || 0) }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Issues</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 环境资产管理表格卡片 -->
+                    <div class="wb-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <div style="font-size: 15px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-layer-group" style="color: #0284c7;"></i>
+                                    <span>运行环境列表</span>
+                                </div>
+                                <el-tag size="small" type="info" effect="plain">{{ filteredEnvironments.length }} 个环境</el-tag>
+                                <el-input 
+                                    v-model="envSearchQuery" 
+                                    placeholder="搜索环境名称或描述..." 
+                                    clearable 
+                                    size="small" 
+                                    style="width: 220px;">
+                                    <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
+                                </el-input>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <el-button size="small" type="primary" plain @click="fetchData">
+                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新
+                                </el-button>
+                                <el-button size="small" type="primary" @click="openCreateEnvDialog">
+                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>新建环境
+                                </el-button>
+                            </div>
+                        </div>
+
+                        <el-table :data="filteredEnvironments" v-loading="loading" style="width: 100%">
+                            <el-table-column prop="id" label="ID" width="70" align="center"></el-table-column>
+                            <el-table-column label="环境名称" min-width="180">
+                                <template #default="{ row }">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="fa-solid fa-cubes" style="color: #0284c7;"></i>
+                                        <span style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</span>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="description" label="环境描述与业务说明" min-width="260">
+                                <template #default="{ row }">
+                                    <span v-if="row.description" style="color: #475569; font-size: 13px;">{{ row.description }}</span>
+                                    <span v-else style="color: #94a3b8; font-style: italic; font-size: 12px;">暂无描述</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="order_num" label="排序权重" width="110" align="center">
+                                <template #default="{ row }">
+                                    <el-tag size="small" effect="plain" type="info">{{ row.order_num }}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="名下监控目标" width="160" align="center">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="primary" link @click="goToEnvTargets(row.name)">
+                                        <i class="fa-solid fa-arrow-up-right-from-square" style="margin-right: 4px;"></i>{{ getEnvTargetCount(row.name) }} 个接口
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="创建时间" width="180" align="center">
+                                <template #default="{ row }">
+                                    <span style="color: #94a3b8; font-size: 12px;">{{ formatTime(row.created_at) }}</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" align="center" fixed="right">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="primary" plain @click="openEditEnvDialog(row)">
+                                        <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
+                                    </el-button>
+                                    <el-popconfirm 
+                                        :title="'确定删除环境 [' + row.name + '] 及其下属资产吗？'" 
+                                        confirm-button-text="确定"
+                                        cancel-button-text="取消"
+                                        @confirm="handleDeleteEnv(row.id, row.name)">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" plain>
+                                                <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+                                </template>
+                            </el-table-column>
+                        </el-table>
                     </div>
                 </div>
 
@@ -824,11 +937,8 @@ export SMTP_USE_SSL="true"
                     <el-col :span="12">
                         <el-form-item label="所属环境" required>
                             <el-select v-model="form.group_name" filterable allow-create default-first-option placeholder="选择或直接输入新环境" style="width: 100%;">
-                                <el-option label="生产环境 (Prod)" value="生产环境"></el-option>
-                                <el-option label="预发布环境 (Staging)" value="预发布环境"></el-option>
-                                <el-option label="测试环境 (Testing)" value="测试环境"></el-option>
-                                <el-option label="开发环境 (Dev)" value="开发环境"></el-option>
-                                <el-option v-for="g in groupList" :key="g.name" :label="g.name" :value="g.name"></el-option>
+                                <el-option v-for="e in environmentList" :key="e.id" :label="e.name + (e.description ? ' (' + e.description + ')' : '')" :value="e.name"></el-option>
+                                <el-option v-for="g in groupList" :key="g.name" :label="g.name" :value="g.name" v-if="!environmentList.some(e => e.name === g.name)"></el-option>
                             </el-select>
                         </el-form-item>
                     </el-col>
@@ -891,6 +1001,28 @@ export SMTP_USE_SSL="true"
                 <el-button @click="createDialogVisible = false">取消</el-button>
                 <el-button type="primary" @click="submitCreateTarget" :loading="submitting">
                     {{ editingTargetId ? '保存修改' : '保存并启动监控' }}
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 新增/编辑环境对话框 -->
+        <el-dialog v-model="envDialogVisible" :title="editingEnvId ? '编辑运行环境' : '新建运行环境'" width="540px" destroy-on-close>
+            <el-form :model="envForm" label-width="100px">
+                <el-form-item label="环境名称" required>
+                    <el-input v-model="envForm.name" placeholder="例如: 生产环境、预发布环境、测试环境"></el-input>
+                </el-form-item>
+                <el-form-item label="业务描述">
+                    <el-input v-model="envForm.description" type="textarea" :rows="3" placeholder="简要描述该环境所属集群或业务职责"></el-input>
+                </el-form-item>
+                <el-form-item label="排序权重">
+                    <el-input-number v-model="envForm.order_num" :min="0" :max="9999" style="width: 140px;"></el-input-number>
+                    <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">数值越小排序越靠前</span>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="envDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitEnvForm" :loading="envSubmitting">
+                    {{ editingEnvId ? '保存修改' : '确认创建' }}
                 </el-button>
             </template>
         </el-dialog>

@@ -24,6 +24,18 @@ const app = createApp({
         const submitting = ref(false);
         const inferring = ref(false);
 
+        // 环境管理专属响应式状态
+        const environmentList = ref([]);
+        const envDialogVisible = ref(false);
+        const editingEnvId = ref(null);
+        const envSubmitting = ref(false);
+        const envSearchQuery = ref("");
+        const envForm = ref({
+            name: "",
+            description: "",
+            order_num: 0
+        });
+
         const sampleJsonText = ref("");
         const form = ref({
             name: "",
@@ -70,6 +82,7 @@ const app = createApp({
         const navTitle = computed(() => {
             switch (currentNav.value) {
                 case "dashboard": return "全局监控大盘";
+                case "env_management": return "环境管理";
                 case "targets": return "环境与服务拨测工作台";
                 case "schema_lab": return "Schema 契约演进实验室";
                 case "incidents": return "故障告警排障中心";
@@ -91,6 +104,18 @@ const app = createApp({
             return targets.value.filter(t => (t.group_name || "默认环境") === selectedGroup.value);
         });
 
+        // 搜索过滤后的环境列表
+        const filteredEnvironments = computed(() => {
+            if (!envSearchQuery.value || !envSearchQuery.value.trim()) {
+                return environmentList.value;
+            }
+            const q = envSearchQuery.value.toLowerCase().trim();
+            return environmentList.value.filter(e => 
+                (e.name && e.name.toLowerCase().includes(q)) || 
+                (e.description && e.description.toLowerCase().includes(q))
+            );
+        });
+
         // vue-element-admin 风格侧边栏激活项与展开控制
         const activeMenuKey = ref("dashboard");
 
@@ -98,6 +123,8 @@ const app = createApp({
             activeMenuKey.value = key;
             if (key === "dashboard") {
                 currentNav.value = "dashboard";
+            } else if (key === "env_management") {
+                currentNav.value = "env_management";
             } else if (key.startsWith("targets:")) {
                 currentNav.value = "targets";
                 selectedGroup.value = key.split(":")[1];
@@ -158,14 +185,40 @@ const app = createApp({
         const fetchData = async () => {
             loading.value = true;
             try {
-                const [targetsRes, summaryRes, groupsRes] = await Promise.all([
+                const [targetsRes, summaryRes, groupsRes, envsRes] = await Promise.all([
                     axios.get("/api/targets"),
                     axios.get("/api/dashboard/summary"),
-                    axios.get("/api/groups")
+                    axios.get("/api/groups"),
+                    axios.get("/api/environments")
                 ]);
                 targets.value = targetsRes.data;
                 summary.value = summaryRes.data;
-                groupList.value = groupsRes.data;
+                environmentList.value = envsRes.data;
+
+                // 统计每个环境下的目标数量与健康状态
+                const envMap = {};
+                for (const t of targets.value) {
+                    const gName = t.group_name || "生产环境";
+                    if (!envMap[gName]) {
+                        envMap[gName] = { name: gName, total: 0, healthy: 0, down: 0 };
+                    }
+                    envMap[gName].total++;
+                    if (t.current_status === "HEALTHY") envMap[gName].healthy++;
+                    if (t.current_status === "DOWN" || t.current_status === "DEGRADED") envMap[gName].down++;
+                }
+
+                // 合并环境资产，保证所有环境即使未挂载目标也在侧边栏展现
+                const mergedGroups = [];
+                for (const env of environmentList.value) {
+                    const stats = envMap[env.name] || { name: env.name, total: 0, healthy: 0, down: 0 };
+                    mergedGroups.push(stats);
+                }
+                for (const gName of Object.keys(envMap)) {
+                    if (!mergedGroups.some(g => g.name === gName)) {
+                        mergedGroups.push(envMap[gName]);
+                    }
+                }
+                groupList.value = mergedGroups;
             } catch (err) {
                 ElementPlus.ElMessage.error("获取监控数据失败: " + (err.response?.data?.detail || err.message));
             } finally {
@@ -213,6 +266,79 @@ const app = createApp({
             } catch (err) {
                 ElementPlus.ElMessage.error("删除失败: " + (err.response?.data?.detail || err.message));
             }
+        };
+
+        // 环境管理 CRUD
+        const openCreateEnvDialog = () => {
+            editingEnvId.value = null;
+            envForm.value = {
+                name: "",
+                description: "",
+                order_num: (environmentList.value.length + 1) * 10
+            };
+            envDialogVisible.value = true;
+        };
+
+        const openEditEnvDialog = (row) => {
+            editingEnvId.value = row.id;
+            envForm.value = {
+                name: row.name || "",
+                description: row.description || "",
+                order_num: row.order_num !== undefined ? row.order_num : 0
+            };
+            envDialogVisible.value = true;
+        };
+
+        const submitEnvForm = async () => {
+            if (!envForm.value.name || !envForm.value.name.trim()) {
+                ElementPlus.ElMessage.warning("请输入环境名称！");
+                return;
+            }
+            envSubmitting.value = true;
+            try {
+                const payload = {
+                    name: envForm.value.name.trim(),
+                    description: envForm.value.description ? envForm.value.description.trim() : "",
+                    order_num: envForm.value.order_num || 0
+                };
+                if (editingEnvId.value) {
+                    await axios.put(`/api/environments/${editingEnvId.value}`, payload);
+                    ElementPlus.ElMessage.success(`环境 [${payload.name}] 修改成功！`);
+                } else {
+                    await axios.post("/api/environments", payload);
+                    ElementPlus.ElMessage.success(`环境 [${payload.name}] 创建成功！`);
+                }
+                envDialogVisible.value = false;
+                await fetchData();
+            } catch (err) {
+                ElementPlus.ElMessage.error((editingEnvId.value ? "修改环境失败: " : "创建环境失败: ") + (err.response?.data?.detail || err.message));
+            } finally {
+                envSubmitting.value = false;
+            }
+        };
+
+        const handleDeleteEnv = async (envId, envName) => {
+            try {
+                await axios.delete(`/api/environments/${envId}`);
+                ElementPlus.ElMessage.success(`环境 [${envName}] 及其下属资产已删除`);
+                if (selectedGroup.value === envName) {
+                    selectedGroup.value = "ALL";
+                    activeMenuKey.value = "targets:ALL";
+                }
+                await fetchData();
+            } catch (err) {
+                ElementPlus.ElMessage.error("删除环境失败: " + (err.response?.data?.detail || err.message));
+            }
+        };
+
+        const goToEnvTargets = (envName) => {
+            currentNav.value = "targets";
+            selectedGroup.value = envName;
+            activeMenuKey.value = `targets:${envName}`;
+        };
+
+        const getEnvTargetCount = (envName) => {
+            return targets.value.filter(t => (t.group_name || "生产环境") === envName).length;
         };
 
         const openCreateDialog = () => {
@@ -563,7 +689,21 @@ const app = createApp({
             formatTime,
             formatLatency,
             getLatencyBadgeClass,
-            openDocs
+            openDocs,
+            // 环境管理导出
+            environmentList,
+            envDialogVisible,
+            editingEnvId,
+            envSubmitting,
+            envSearchQuery,
+            envForm,
+            filteredEnvironments,
+            openCreateEnvDialog,
+            openEditEnvDialog,
+            submitEnvForm,
+            handleDeleteEnv,
+            goToEnvTargets,
+            getEnvTargetCount
         };
     }
 });

@@ -166,6 +166,17 @@ def update_environment(id: int, data: Environment, session: Session = Depends(ge
     env = session.get(Environment, id)
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found")
+    old_name = env.name
+    # 检查是否重名冲突
+    if data.name != old_name:
+        existing = session.exec(select(Environment).where(Environment.name == data.name)).first()
+        if existing and existing.id != id:
+            raise HTTPException(status_code=400, detail=f"环境名称 [{data.name}] 已被使用")
+        # 联动更新 MonitorTarget 下的 group_name
+        targets = session.exec(select(MonitorTarget).where(MonitorTarget.group_name == old_name)).all()
+        for t in targets:
+            t.group_name = data.name
+            session.add(t)
     env.name = data.name
     env.description = data.description
     env.order_num = data.order_num
@@ -180,6 +191,11 @@ def delete_environment(id: int, session: Session = Depends(get_session)):
     env = session.get(Environment, id)
     if not env:
         raise HTTPException(status_code=404, detail="Environment not found")
+    # 级联删除关联的 MonitorTarget
+    targets = session.exec(select(MonitorTarget).where(MonitorTarget.group_name == env.name)).all()
+    for t in targets:
+        remove_target_job(t.id)
+        session.delete(t)
     # 级联删除分组、机器、探针
     groups = session.exec(select(ServiceGroup).where(ServiceGroup.environment_id == id)).all()
     for g in groups:
@@ -194,7 +210,7 @@ def delete_environment(id: int, session: Session = Depends(get_session)):
         session.delete(g)
     session.delete(env)
     session.commit()
-    return {"status": "ok", "message": f"环境 id={id} 及其下属资产已删除"}
+    return {"status": "ok", "message": f"环境 id={id} [{env.name}] 及其下属资产已删除"}
 
 
 # 2. 分组层 CRUD
