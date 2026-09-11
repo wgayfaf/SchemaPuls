@@ -385,6 +385,7 @@
         .status-badge.healthy { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
         .status-badge.down { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
         .status-badge.degraded { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+        .status-badge.circuit-broken { background: #fef2f2; color: #991b1b; border: 1px solid #f87171; }
         .status-badge.unknown { background: #f1f5f9; color: #64748b; border: 1px solid #dbe5f0; }
 
         /* 延迟耗时标签 (清晰工控数显) */
@@ -479,6 +480,16 @@
                             <span>环境管理</span>
                             <span class="sub-badge">{{ environmentList.length }}</span>
                         </el-menu-item>
+                        <el-menu-item index="machine_management">
+                            <i class="fa-solid fa-server menu-icon" style="color: #10b981;"></i>
+                            <span>机器管理</span>
+                            <span class="sub-badge">{{ machineList.length }}</span>
+                        </el-menu-item>
+                        <el-menu-item index="api_management">
+                            <i class="fa-solid fa-code menu-icon" style="color: #8b5cf6;"></i>
+                            <span>接口管理</span>
+                            <span class="sub-badge">{{ apiList.length }}</span>
+                        </el-menu-item>
                         <el-menu-item index="targets:ALL">
                             <i class="fa-solid fa-globe menu-icon" style="color: #60a5fa;"></i>
                             <span>全部环境节点</span>
@@ -558,6 +569,12 @@
                     </el-button>
                     <el-button v-if="currentNav === 'env_management'" type="primary" size="small" @click="openCreateEnvDialog">
                         <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建环境
+                    </el-button>
+                    <el-button v-else-if="currentNav === 'machine_management'" type="primary" size="small" @click="openCreateMachineDialog()">
+                        <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建机器
+                    </el-button>
+                    <el-button v-else-if="currentNav === 'api_management'" type="primary" size="small" @click="openCreateApiDialog()">
+                        <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建接口
                     </el-button>
                     <el-button v-else type="primary" size="small" @click="openCreateDialog">
                         <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建监控目标
@@ -724,6 +741,298 @@
                     </div>
                 </div>
 
+                <!-- 视图: 机器管理 (Machine Management) -->
+                <div v-show="currentNav === 'machine_management'">
+                    <!-- 顶部机器与运行指标卡片 -->
+                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
+                        <div class="kpi-box">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">托管机器总数</div>
+                            <div class="kpi-num">{{ machineList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
+                        </div>
+                        <div class="kpi-box kpi-success">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">在线运行节点</div>
+                            <div class="kpi-num" style="color: #059669;">{{ onlineMachineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Online</span></div>
+                        </div>
+                        <div class="kpi-box kpi-danger">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">离线/异常节点</div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ offlineMachineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Down</span></div>
+                        </div>
+                        <div class="kpi-box kpi-info">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">平均 TCP 握手耗时</div>
+                            <div class="kpi-num" style="color: #0284c7;">{{ avgTcpLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 机器资产管理表格卡片 -->
+                    <div class="wb-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div style="font-size: 15px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-server" style="color: #10b981;"></i>
+                                    <span>机器节点列表</span>
+                                </div>
+                                <el-radio-group v-model="selectedMachineEnv" size="small">
+                                    <el-radio-button label="ALL">全部环境</el-radio-button>
+                                    <el-radio-button v-for="env in environmentList" :key="env.id" :label="env.name">{{ env.name }}</el-radio-button>
+                                </el-radio-group>
+                                <el-tag size="small" type="info" effect="plain">{{ filteredMachines.length }} 台机器</el-tag>
+                                <el-input 
+                                    v-model="machineSearchQuery" 
+                                    placeholder="搜索机器名、IP或端口..." 
+                                    clearable 
+                                    size="small" 
+                                    style="width: 220px;">
+                                    <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
+                                </el-input>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <el-button size="small" type="primary" plain @click="fetchData">
+                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新
+                                </el-button>
+                                <el-button size="small" type="primary" @click="openCreateMachineDialog()">
+                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>新建机器
+                                </el-button>
+                            </div>
+                        </div>
+
+                        <el-table :data="filteredMachines" v-loading="loading" style="width: 100%">
+                            <el-table-column prop="id" label="ID" width="70" align="center"></el-table-column>
+                            <el-table-column label="机器名称" min-width="180">
+                                <template #default="{ row }">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="fa-solid fa-server" style="color: #10b981;"></i>
+                                        <span style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</span>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="所属环境" width="130">
+                                <template #default="{ row }">
+                                    <el-tag size="small" :type="getGroupTagType(row.environment_name)" effect="light" style="font-weight: 600;">
+                                        {{ row.environment_name || '生产环境' }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="网络访问地址" min-width="180">
+                                <template #default="{ row }">
+                                    <span class="code-pill">{{ row.host }}:{{ row.port }}</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="TCP 探活状态" width="130" align="center">
+                                <template #default="{ row }">
+                                    <span :class="getStatusBadgeClass(row.current_status)">
+                                        <i :class="getStatusIcon(row.current_status)" style="margin-right: 4px;"></i>
+                                        {{ row.current_status }}
+                                    </span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="网络延迟" width="110" align="center">
+                                <template #default="{ row }">
+                                    <span v-if="row.last_tcp_latency_ms" :class="getLatencyBadgeClass(row.last_tcp_latency_ms)">
+                                        {{ formatLatency(row.last_tcp_latency_ms) }}
+                                    </span>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">待探测</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="cron_interval_minutes" label="周期" width="80" align="center">
+                                <template #default="{ row }">
+                                    <span style="font-size: 12px; color: var(--text-muted);">{{ row.cron_interval_minutes }}m</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="名下接口" width="130" align="center">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="primary" link @click="goToMachineTargets(row)">
+                                        <i class="fa-solid fa-arrow-up-right-from-square" style="margin-right: 4px;"></i>{{ row.api_count }} 个接口
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="最新探活时间" width="170" align="center">
+                                <template #default="{ row }">
+                                    <span style="color: #94a3b8; font-size: 12px;">{{ formatTime(row.last_probed_at) }}</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="230" align="center" fixed="right">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="success" plain :loading="triggeringMachineId === row.id" @click="handleTriggerMachine(row)">
+                                        <i class="fa-solid fa-bolt" style="margin-right: 4px;"></i>探活
+                                    </el-button>
+                                    <el-button size="small" type="primary" plain @click="openEditMachineDialog(row)">
+                                        <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
+                                    </el-button>
+                                    <el-popconfirm 
+                                        :title="'确定删除机器 [' + row.name + '] 吗？'" 
+                                        confirm-button-text="确定"
+                                        cancel-button-text="取消"
+                                        @confirm="handleDeleteMachine(row.id, row.name)">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" plain>
+                                                <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+                </div>
+
+                <!-- 视图: 接口管理 (API Probe Management) -->
+                <div v-show="currentNav === 'api_management'">
+                    <!-- 顶部接口指标卡片 -->
+                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
+                        <div class="kpi-box">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">纳管接口总数</div>
+                            <div class="kpi-num">{{ apiList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">APIs</span></div>
+                        </div>
+                        <div class="kpi-box kpi-success">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">契约与运行正常</div>
+                            <div class="kpi-num" style="color: #059669;">{{ healthyApiCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
+                        </div>
+                        <div class="kpi-box kpi-danger">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">异常/熔断挂起</div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ issueApiCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Issues</span></div>
+                        </div>
+                        <div class="kpi-box kpi-info">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">平均 HTTP 响应延迟</div>
+                            <div class="kpi-num" style="color: #8b5cf6;">{{ avgApiLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 接口资产管理表格卡片 -->
+                    <div class="wb-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div style="font-size: 15px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-code" style="color: #8b5cf6;"></i>
+                                    <span>机器接口列表</span>
+                                </div>
+                                <el-radio-group v-model="selectedApiEnv" size="small">
+                                    <el-radio-button label="ALL">全部环境</el-radio-button>
+                                    <el-radio-button v-for="env in environmentList" :key="env.id" :label="env.name">{{ env.name }}</el-radio-button>
+                                </el-radio-group>
+                                <el-select v-model="selectedApiMachine" placeholder="所属机器" size="small" style="width: 170px;">
+                                    <el-option label="全部机器节点" value="ALL"></el-option>
+                                    <el-option v-for="m in currentEnvMachineOptions" :key="m.id" :label="m.name + ' (' + m.host + ':' + m.port + ')'" :value="m.id"></el-option>
+                                </el-select>
+                                <el-select v-model="selectedApiStatus" placeholder="状态过滤" size="small" style="width: 130px;">
+                                    <el-option label="全部状态" value="ALL"></el-option>
+                                    <el-option label="HEALTHY" value="HEALTHY"></el-option>
+                                    <el-option label="DOWN" value="DOWN"></el-option>
+                                    <el-option label="DEGRADED" value="DEGRADED"></el-option>
+                                    <el-option label="CIRCUIT_BROKEN" value="CIRCUIT_BROKEN"></el-option>
+                                </el-select>
+                                <el-tag size="small" type="info" effect="plain">{{ filteredApis.length }} 个接口</el-tag>
+                                <el-input 
+                                    v-model="apiSearchQuery" 
+                                    placeholder="搜索接口名、路径、机器..." 
+                                    clearable 
+                                    size="small" 
+                                    style="width: 210px;">
+                                    <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
+                                </el-input>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <el-button size="small" type="primary" plain @click="fetchData">
+                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新
+                                </el-button>
+                                <el-button size="small" type="primary" @click="openCreateApiDialog()">
+                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>新建接口
+                                </el-button>
+                            </div>
+                        </div>
+
+                        <el-table :data="filteredApis" v-loading="loading" style="width: 100%">
+                            <el-table-column prop="id" label="ID" width="60" align="center"></el-table-column>
+                            <el-table-column label="接口名称" min-width="170">
+                                <template #default="{ row }">
+                                    <div style="display: flex; flex-direction: column;">
+                                        <div style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</div>
+                                        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+                                            <i class="fa-solid fa-server" style="color: #10b981; margin-right: 4px;"></i>{{ row.machine_name }}
+                                            <span v-if="row.machine_status === 'OFFLINE'" style="color: #ef4444; font-weight: 600;">(宿主离线)</span>
+                                        </div>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="所属环境" width="120">
+                                <template #default="{ row }">
+                                    <el-tag size="small" :type="getGroupTagType(row.environment_name)" effect="light" style="font-weight: 600;">
+                                        {{ row.environment_name || '生产环境' }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="请求方法与完整地址" min-width="260">
+                                <template #default="{ row }">
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <el-tag size="small" :type="row.http_method === 'GET' ? 'success' : (row.http_method === 'POST' ? 'primary' : 'warning')" effect="dark" style="font-weight: 700; font-size: 11px;">
+                                            {{ row.http_method }}
+                                        </el-tag>
+                                        <span class="code-pill" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="row.full_url || (row.machine_host + ':' + row.machine_port + row.http_path)">
+                                            {{ row.full_url || (row.machine_host + ':' + row.machine_port + row.http_path) }}
+                                        </span>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="运行状态" width="135" align="center">
+                                <template #default="{ row }">
+                                    <span v-if="row.current_status === 'CIRCUIT_BROKEN'" class="status-badge circuit-broken">
+                                        <i class="fa-solid fa-ban" style="margin-right: 4px;"></i>熔断挂起
+                                    </span>
+                                    <span v-else :class="getStatusBadgeClass(row.current_status)">
+                                        <i :class="getStatusIcon(row.current_status)" style="margin-right: 4px;"></i>
+                                        {{ row.current_status }}
+                                    </span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="HTTP/延迟" width="125" align="center">
+                                <template #default="{ row }">
+                                    <div v-if="row.last_http_latency_ms !== null && row.last_http_latency_ms !== undefined">
+                                        <span :class="getLatencyBadgeClass(row.last_http_latency_ms)">
+                                            {{ row.last_http_latency_ms }} ms
+                                        </span>
+                                    </div>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">待探测</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="契约校验" width="115" align="center">
+                                <template #default="{ row }">
+                                    <el-tag v-if="row.last_schema_matched === true" type="success" size="small">一致</el-tag>
+                                    <el-tag v-else-if="row.last_schema_matched === false" type="danger" size="small">破坏性突变</el-tag>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="cron_interval_minutes" label="周期" width="75" align="center">
+                                <template #default="{ row }">
+                                    <span style="font-size: 12px; color: var(--text-muted);">{{ row.cron_interval_minutes }}m</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="260" align="center" fixed="right">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="success" plain :loading="triggeringApiId === row.id" @click="handleTriggerApi(row)">
+                                        <i class="fa-solid fa-bolt" style="margin-right: 4px;"></i>拨测
+                                    </el-button>
+                                    <el-button size="small" type="info" plain @click="openApiMetricsDrawer(row)">
+                                        <i class="fa-solid fa-chart-line" style="margin-right: 4px;"></i>时序
+                                    </el-button>
+                                    <el-button size="small" type="primary" plain @click="openEditApiDialog(row)">
+                                        <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
+                                    </el-button>
+                                    <el-popconfirm 
+                                        :title="'确定删除接口 [' + row.name + '] 吗？'" 
+                                        confirm-button-text="确定"
+                                        cancel-button-text="取消"
+                                        @confirm="handleDeleteApi(row.id, row.name)">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" plain>
+                                                <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                    </div>
+                </div>
+
                 <!-- 视图 2: 环境与服务拨测工作台 (Targets) -->
                 <div v-show="currentNav === 'targets'">
                     <div class="wb-card">
@@ -731,6 +1040,12 @@
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <span style="font-size: 15px; font-weight: 600; color: #0f172a;">接口健康探测列表</span>
                                 <el-tag size="small" type="info" effect="plain">{{ filteredTargets.length }} 项</el-tag>
+                                <el-button size="small" type="primary" plain @click="switchNav('machine_management')">
+                                    <i class="fa-solid fa-server" style="margin-right: 4px;"></i>机器管理
+                                </el-button>
+                                <el-button size="small" type="primary" plain @click="switchNav('api_management')">
+                                    <i class="fa-solid fa-code" style="margin-right: 4px;"></i>接口管理
+                                </el-button>
                             </div>
                             <div style="display: flex; gap: 8px;">
                                 <el-radio-group v-model="selectedGroup" size="small">
@@ -953,6 +1268,18 @@ export SMTP_USE_SSL="true"
                     <el-col :span="14">
                         <el-form-item label="IP / 域名" required>
                             <el-input v-model="form.host" placeholder="例如: httpbin.org 或 192.168.1.10"></el-input>
+                            <div v-if="currentEnvMachines.length > 0" style="margin-top: 6px; font-size: 12px; color: var(--text-muted); display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                                <span>快捷绑定已有机器:</span>
+                                <el-tag 
+                                    v-for="m in currentEnvMachines" 
+                                    :key="m.id" 
+                                    size="small" 
+                                    type="info" 
+                                    style="cursor: pointer;" 
+                                    @click="form.host = m.host; form.port = m.port;">
+                                    {{ m.name }} ({{ m.host }}:{{ m.port }})
+                                </el-tag>
+                            </div>
                         </el-form-item>
                     </el-col>
                     <el-col :span="10">
@@ -1023,6 +1350,103 @@ export SMTP_USE_SSL="true"
                 <el-button @click="envDialogVisible = false">取消</el-button>
                 <el-button type="primary" @click="submitEnvForm" :loading="envSubmitting">
                     {{ editingEnvId ? '保存修改' : '确认创建' }}
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 新增/编辑机器对话框 -->
+        <el-dialog v-model="machineDialogVisible" :title="editingMachineId ? '编辑机器节点' : '新建机器节点'" width="560px" destroy-on-close>
+            <el-form :model="machineForm" label-width="110px">
+                <el-form-item label="所属环境" required>
+                    <el-select v-model="machineForm.environment_id" placeholder="选择所属环境" style="width: 100%;">
+                        <el-option v-for="env in environmentList" :key="env.id" :label="env.name + (env.description ? ' (' + env.description + ')' : '')" :value="env.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="机器名称" required>
+                    <el-input v-model="machineForm.name" placeholder="例如: 生产网关节点-01"></el-input>
+                </el-form-item>
+                <el-row :gutter="12">
+                    <el-col :span="15">
+                        <el-form-item label="IP / 域名" required>
+                            <el-input v-model="machineForm.host" placeholder="例如: 192.168.1.10 或 httpbin.org"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="9">
+                        <el-form-item label="TCP 端口" required label-width="80px">
+                            <el-input-number v-model="machineForm.port" :min="1" :max="65535" style="width: 100%;"></el-input-number>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-form-item label="探活周期(分)">
+                    <el-input-number v-model="machineForm.cron_interval_minutes" :min="1" :max="60" style="width: 140px;"></el-input-number>
+                    <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">后台定时探测 TCP 端口开放情况</span>
+                </el-form-item>
+                <el-form-item label="告警通知邮箱">
+                    <el-input v-model="machineForm.email_input" placeholder="多个邮箱用逗号隔开，如: ops@company.com"></el-input>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="machineDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitMachineForm" :loading="machineSubmitting">
+                    {{ editingMachineId ? '保存修改' : '确认接入' }}
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <!-- 新增/编辑接口对话框 -->
+        <el-dialog v-model="apiDialogVisible" :title="editingApiId ? '编辑接口探测配置' : '新建机器接口探测'" width="640px" destroy-on-close>
+            <el-form :model="apiForm" label-width="110px">
+                <el-form-item label="宿主机器" required>
+                    <el-select v-model="apiForm.machine_id" placeholder="选择归属机器节点" style="width: 100%;">
+                        <el-option v-for="m in machineList" :key="m.id" :label="m.name + ' (' + (m.environment_name || '未指定') + ' | ' + m.host + ':' + m.port + ')'" :value="m.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="接口名称" required>
+                    <el-input v-model="apiForm.name" placeholder="例如: 用户鉴权接口 / 订单查询接口"></el-input>
+                </el-form-item>
+                <el-row :gutter="12">
+                    <el-col :span="8">
+                        <el-form-item label="请求方法" required>
+                            <el-select v-model="apiForm.http_method" style="width: 100%;">
+                                <el-option label="GET" value="GET"></el-option>
+                                <el-option label="POST" value="POST"></el-option>
+                                <el-option label="PUT" value="PUT"></el-option>
+                                <el-option label="DELETE" value="DELETE"></el-option>
+                                <el-option label="PATCH" value="PATCH"></el-option>
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="16">
+                        <el-form-item label="相对路径" required label-width="80px">
+                            <el-input v-model="apiForm.http_path" placeholder="例如: /api/v1/health 或 /get"></el-input>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-form-item label="探测周期(分)">
+                    <el-input-number v-model="apiForm.cron_interval_minutes" :min="1" :max="60" style="width: 140px;"></el-input-number>
+                    <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">宿主离线时自动熔断抑制告警</span>
+                </el-form-item>
+                <el-form-item label="告警通知邮箱">
+                    <el-input v-model="apiForm.email_input" placeholder="多个邮箱用逗号隔开，如: api-ops@company.com"></el-input>
+                </el-form-item>
+                <el-form-item label="JSON 推导辅助">
+                    <div style="width: 100%;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                            <el-input v-model="apiSampleJson" type="textarea" :rows="2" placeholder="在此粘贴接口真实返回的任意 JSON 数据，点击推导即可一键生成下方 Schema 契约规则..."></el-input>
+                        </div>
+                        <el-button size="small" type="primary" plain @click="handleInferApiSchema" :loading="apiInferring">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从真实返回推导 Draft-7 Schema
+                        </el-button>
+                    </div>
+                </el-form-item>
+                <el-form-item label="预期 Schema" required>
+                    <el-input v-model="apiForm.schema_text" type="textarea" :rows="5" font-family="monospace" placeholder="标准的 JSON Schema 规范 (Draft-7)"></el-input>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="apiDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitApiForm" :loading="apiSubmitting">
+                    {{ editingApiId ? '保存修改' : '确认创建并接入调度' }}
                 </el-button>
             </template>
         </el-dialog>

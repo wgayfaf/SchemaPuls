@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -264,32 +264,148 @@ def delete_service_group(id: int, session: Session = Depends(get_session)):
     return {"status": "ok", "message": f"分组 id={id} 及其下属资产已删除"}
 
 
+class MachinePayload(BaseModel):
+    name: str
+    host: str
+    port: int
+    environment_id: Optional[int] = None
+    group_id: Optional[int] = None
+    cron_interval_minutes: int = 5
+    is_active: bool = True
+    email_receivers: List[str] = []
+    retry_threshold: int = 3
+    silence_minutes: int = 30
+
+
 # 3. 机器节点层 CRUD 与即时连通性探测
-@app.get("/api/machines", response_model=List[MachineNode])
-def list_machines(group_id: Optional[int] = None, session: Session = Depends(get_session)):
+@app.get("/api/machines")
+def list_machines(environment_id: Optional[int] = None, group_id: Optional[int] = None, session: Session = Depends(get_session)):
     stmt = select(MachineNode)
     if group_id:
         stmt = stmt.where(MachineNode.group_id == group_id)
-    return session.exec(stmt).all()
+    machines = session.exec(stmt).all()
+    
+    result = []
+    for m in machines:
+        grp = session.get(ServiceGroup, m.group_id) if m.group_id else None
+        env = session.get(Environment, grp.environment_id) if grp else None
+        
+        # 过滤环境
+        if environment_id and (not env or env.id != environment_id):
+            continue
+            
+        target_count = session.exec(select(func.count(MonitorTarget.id)).where(MonitorTarget.host == m.host, MonitorTarget.port == m.port)).one() or 0
+        api_count = session.exec(select(func.count(ApiProbe.id)).where(ApiProbe.machine_id == m.id)).one() or 0
+        
+        m_dict = {
+            "id": m.id,
+            "name": m.name,
+            "host": m.host,
+            "port": m.port,
+            "cron_interval_minutes": m.cron_interval_minutes,
+            "is_active": m.is_active,
+            "retry_threshold": m.retry_threshold,
+            "silence_minutes": m.silence_minutes,
+            "email_receivers": m.email_receivers or [],
+            "current_status": m.current_status,
+            "consecutive_failures": m.consecutive_failures,
+            "last_tcp_latency_ms": m.last_tcp_latency_ms,
+            "last_probed_at": m.last_probed_at.isoformat() if m.last_probed_at else None,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "group_id": m.group_id,
+            "group_name": grp.name if grp else "核心集群",
+            "environment_id": env.id if env else None,
+            "environment_name": env.name if env else "默认环境",
+            "api_count": max(target_count, api_count)
+        }
+        result.append(m_dict)
+    return result
 
 
-@app.post("/api/machines", response_model=MachineNode)
-def create_machine(machine: MachineNode, session: Session = Depends(get_session)):
-    grp = session.get(ServiceGroup, machine.group_id)
-    if not grp:
-        raise HTTPException(status_code=404, detail="Associated ServiceGroup not found")
+@app.post("/api/machines")
+def create_machine(data: MachinePayload, session: Session = Depends(get_session)):
+    group_id = data.group_id
+    if not group_id:
+        if data.environment_id:
+            env = session.get(Environment, data.environment_id)
+            if not env:
+                raise HTTPException(status_code=404, detail="Associated Environment not found")
+            grp = session.exec(select(ServiceGroup).where(ServiceGroup.environment_id == env.id)).first()
+            if not grp:
+                grp = ServiceGroup(environment_id=env.id, name=f"{env.name}核心集群", description="默认业务集群")
+                session.add(grp)
+                session.commit()
+                session.refresh(grp)
+            group_id = grp.id
+        else:
+            first_grp = session.exec(select(ServiceGroup)).first()
+            if not first_grp:
+                env = Environment(name="生产环境", description="核心线上生产集群", order_num=1)
+                session.add(env)
+                session.commit()
+                session.refresh(env)
+                first_grp = ServiceGroup(environment_id=env.id, name="生产环境核心集群", description="主业务集群")
+                session.add(first_grp)
+                session.commit()
+                session.refresh(first_grp)
+            group_id = first_grp.id
+    
+    machine = MachineNode(
+        group_id=group_id,
+        name=data.name,
+        host=data.host,
+        port=data.port,
+        cron_interval_minutes=data.cron_interval_minutes,
+        is_active=data.is_active,
+        retry_threshold=data.retry_threshold,
+        silence_minutes=data.silence_minutes,
+        email_receivers=data.email_receivers
+    )
     session.add(machine)
     session.commit()
     session.refresh(machine)
     add_machine_job(machine)
-    return machine
+    
+    grp = session.get(ServiceGroup, machine.group_id)
+    env = session.get(Environment, grp.environment_id) if grp else None
+    
+    return {
+        "id": machine.id,
+        "name": machine.name,
+        "host": machine.host,
+        "port": machine.port,
+        "cron_interval_minutes": machine.cron_interval_minutes,
+        "is_active": machine.is_active,
+        "current_status": machine.current_status,
+        "last_tcp_latency_ms": machine.last_tcp_latency_ms,
+        "email_receivers": machine.email_receivers or [],
+        "group_id": machine.group_id,
+        "group_name": grp.name if grp else "核心集群",
+        "environment_id": env.id if env else None,
+        "environment_name": env.name if env else "默认环境",
+        "api_count": 0
+    }
 
 
-@app.put("/api/machines/{id}", response_model=MachineNode)
-def update_machine(id: int, data: MachineNode, session: Session = Depends(get_session)):
+@app.put("/api/machines/{id}")
+def update_machine(id: int, data: MachinePayload, session: Session = Depends(get_session)):
     machine = session.get(MachineNode, id)
     if not machine:
         raise HTTPException(status_code=404, detail="MachineNode not found")
+        
+    if data.environment_id:
+        env = session.get(Environment, data.environment_id)
+        if env:
+            grp = session.exec(select(ServiceGroup).where(ServiceGroup.environment_id == env.id)).first()
+            if not grp:
+                grp = ServiceGroup(environment_id=env.id, name=f"{env.name}核心集群", description="默认业务集群")
+                session.add(grp)
+                session.commit()
+                session.refresh(grp)
+            machine.group_id = grp.id
+    elif data.group_id:
+        machine.group_id = data.group_id
+        
     machine.name = data.name
     machine.host = data.host
     machine.port = data.port
@@ -300,7 +416,25 @@ def update_machine(id: int, data: MachineNode, session: Session = Depends(get_se
     session.commit()
     session.refresh(machine)
     add_machine_job(machine)
-    return machine
+    
+    grp = session.get(ServiceGroup, machine.group_id)
+    env = session.get(Environment, grp.environment_id) if grp else None
+    
+    return {
+        "id": machine.id,
+        "name": machine.name,
+        "host": machine.host,
+        "port": machine.port,
+        "cron_interval_minutes": machine.cron_interval_minutes,
+        "is_active": machine.is_active,
+        "current_status": machine.current_status,
+        "last_tcp_latency_ms": machine.last_tcp_latency_ms,
+        "email_receivers": machine.email_receivers or [],
+        "group_id": machine.group_id,
+        "group_name": grp.name if grp else "核心集群",
+        "environment_id": env.id if env else None,
+        "environment_name": env.name if env else "默认环境"
+    }
 
 
 @app.delete("/api/machines/{id}")
@@ -328,32 +462,161 @@ async def trigger_machine_probe(id: int):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+class ApiPayload(BaseModel):
+    machine_id: int
+    name: str
+    http_path: str = "/health"
+    http_method: str = "GET"
+    http_headers: Dict[str, str] = {}
+    expected_schema: Dict[str, Any]
+    cron_interval_minutes: int = 5
+    is_active: bool = True
+    email_receivers: List[str] = []
+    retry_threshold: int = 3
+    silence_minutes: int = 30
+
+
 # 4. 接口探针层 CRUD 与即时业务校验
-@app.get("/api/apis", response_model=List[ApiProbe])
-def list_apis(machine_id: Optional[int] = None, session: Session = Depends(get_session)):
+@app.get("/api/apis")
+def list_apis(
+    machine_id: Optional[int] = None,
+    environment_id: Optional[int] = None,
+    session: Session = Depends(get_session)
+):
     stmt = select(ApiProbe)
     if machine_id:
         stmt = stmt.where(ApiProbe.machine_id == machine_id)
-    return session.exec(stmt).all()
+    apis = session.exec(stmt).all()
+    
+    result = []
+    for a in apis:
+        m = session.get(MachineNode, a.machine_id)
+        grp = session.get(ServiceGroup, m.group_id) if m and m.group_id else None
+        env = session.get(Environment, grp.environment_id) if grp else None
+        
+        if environment_id and (not env or env.id != environment_id):
+            continue
+            
+        host = m.host if m else "127.0.0.1"
+        port = m.port if m else 80
+        scheme = "https" if port == 443 else "http"
+        port_str = f":{port}" if port not in [80, 443] else ""
+        path = a.http_path if a.http_path.startswith("/") else f"/{a.http_path}"
+        full_url = f"{scheme}://{host}{port_str}{path}"
+        
+        result.append({
+            "id": a.id,
+            "machine_id": a.machine_id,
+            "name": a.name,
+            "http_path": a.http_path,
+            "http_method": a.http_method,
+            "http_headers": a.http_headers or {},
+            "expected_schema": a.expected_schema,
+            "cron_interval_minutes": a.cron_interval_minutes,
+            "is_active": a.is_active,
+            "retry_threshold": a.retry_threshold,
+            "silence_minutes": a.silence_minutes,
+            "email_receivers": a.email_receivers or [],
+            "current_status": a.current_status,
+            "consecutive_failures": a.consecutive_failures,
+            "last_http_code": a.last_http_code,
+            "last_http_latency_ms": a.last_http_latency_ms,
+            "last_schema_matched": a.last_schema_matched,
+            "last_probed_at": a.last_probed_at.isoformat() if a.last_probed_at else None,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "machine_name": m.name if m else f"node-{host}:{port}",
+            "machine_host": host,
+            "machine_port": port,
+            "machine_status": m.current_status if m else "UNKNOWN",
+            "environment_id": env.id if env else None,
+            "environment_name": env.name if env else "默认环境",
+            "group_name": grp.name if grp else "核心集群",
+            "full_url": full_url
+        })
+    return result
 
 
-@app.post("/api/apis", response_model=ApiProbe)
-def create_api(api: ApiProbe, session: Session = Depends(get_session)):
-    machine = session.get(MachineNode, api.machine_id)
+@app.post("/api/apis")
+def create_api(data: ApiPayload, session: Session = Depends(get_session)):
+    machine = session.get(MachineNode, data.machine_id)
     if not machine:
         raise HTTPException(status_code=404, detail="Associated MachineNode not found")
+        
+    api = ApiProbe(
+        machine_id=data.machine_id,
+        name=data.name,
+        http_path=data.http_path,
+        http_method=data.http_method,
+        http_headers=data.http_headers,
+        expected_schema=data.expected_schema,
+        cron_interval_minutes=data.cron_interval_minutes,
+        is_active=data.is_active,
+        retry_threshold=data.retry_threshold,
+        silence_minutes=data.silence_minutes,
+        email_receivers=data.email_receivers
+    )
     session.add(api)
     session.commit()
     session.refresh(api)
     add_api_job(api)
-    return api
+    
+    grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
+    env = session.get(Environment, grp.environment_id) if grp else None
+    
+    # 同步维护 MonitorTarget 以保障大盘与兼容平铺视图
+    target = MonitorTarget(
+        name=api.name,
+        group_name=env.name if env else "生产环境",
+        host=machine.host,
+        port=machine.port,
+        http_path=api.http_path,
+        http_method=api.http_method,
+        cron_interval_minutes=api.cron_interval_minutes,
+        expected_schema=api.expected_schema,
+        email_receivers=api.email_receivers,
+        retry_threshold=api.retry_threshold,
+        silence_minutes=api.silence_minutes
+    )
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    add_target_job(target)
+    
+    scheme = "https" if machine.port == 443 else "http"
+    port_str = f":{machine.port}" if machine.port not in [80, 443] else ""
+    path = api.http_path if api.http_path.startswith("/") else f"/{api.http_path}"
+    
+    return {
+        "id": api.id,
+        "machine_id": api.machine_id,
+        "name": api.name,
+        "http_path": api.http_path,
+        "http_method": api.http_method,
+        "expected_schema": api.expected_schema,
+        "cron_interval_minutes": api.cron_interval_minutes,
+        "is_active": api.is_active,
+        "current_status": api.current_status,
+        "machine_name": machine.name,
+        "machine_host": machine.host,
+        "machine_port": machine.port,
+        "environment_id": env.id if env else None,
+        "environment_name": env.name if env else "默认环境",
+        "full_url": f"{scheme}://{machine.host}{port_str}{path}"
+    }
 
 
-@app.put("/api/apis/{id}", response_model=ApiProbe)
-def update_api(id: int, data: ApiProbe, session: Session = Depends(get_session)):
+@app.put("/api/apis/{id}")
+def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session)):
     api = session.get(ApiProbe, id)
     if not api:
         raise HTTPException(status_code=404, detail="ApiProbe not found")
+        
+    machine = session.get(MachineNode, data.machine_id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="Associated MachineNode not found")
+        
+    old_name = api.name
+    api.machine_id = data.machine_id
     api.name = data.name
     api.http_path = data.http_path
     api.http_method = data.http_method
@@ -366,7 +629,45 @@ def update_api(id: int, data: ApiProbe, session: Session = Depends(get_session))
     session.commit()
     session.refresh(api)
     add_api_job(api)
-    return api
+    
+    # 同步更新对应 MonitorTarget (若匹配)
+    targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == old_name)).all()
+    for t in targets:
+        t.name = api.name
+        t.host = machine.host
+        t.port = machine.port
+        t.http_path = api.http_path
+        t.http_method = api.http_method
+        t.expected_schema = api.expected_schema
+        t.cron_interval_minutes = api.cron_interval_minutes
+        t.email_receivers = api.email_receivers
+        session.add(t)
+        add_target_job(t)
+    session.commit()
+    
+    grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
+    env = session.get(Environment, grp.environment_id) if grp else None
+    scheme = "https" if machine.port == 443 else "http"
+    port_str = f":{machine.port}" if machine.port not in [80, 443] else ""
+    path = api.http_path if api.http_path.startswith("/") else f"/{api.http_path}"
+    
+    return {
+        "id": api.id,
+        "machine_id": api.machine_id,
+        "name": api.name,
+        "http_path": api.http_path,
+        "http_method": api.http_method,
+        "expected_schema": api.expected_schema,
+        "cron_interval_minutes": api.cron_interval_minutes,
+        "is_active": api.is_active,
+        "current_status": api.current_status,
+        "machine_name": machine.name,
+        "machine_host": machine.host,
+        "machine_port": machine.port,
+        "environment_id": env.id if env else None,
+        "environment_name": env.name if env else "默认环境",
+        "full_url": f"{scheme}://{machine.host}{port_str}{path}"
+    }
 
 
 @app.delete("/api/apis/{id}")
@@ -374,7 +675,12 @@ def delete_api(id: int, session: Session = Depends(get_session)):
     api = session.get(ApiProbe, id)
     if not api:
         raise HTTPException(status_code=404, detail="ApiProbe not found")
+    name = api.name
     remove_api_job(id)
+    targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == name)).all()
+    for t in targets:
+        remove_target_job(t.id)
+        session.delete(t)
     session.delete(api)
     session.commit()
     return {"status": "ok", "message": f"接口探针 id={id} 已删除"}
