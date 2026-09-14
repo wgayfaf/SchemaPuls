@@ -254,11 +254,13 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         machine_status = machine.current_status
         machine_host = machine.host
         machine_port = machine.port
+        machine_base_url = machine.base_url
         machine_last_tcp_ms = machine.last_tcp_latency_ms
         machine_id = machine.id
 
         api_id = api.id
         api_name = api.name
+        api_base_url = api.base_url
         api_http_path = api.http_path
         api_http_method = api.http_method
         api_http_params = list(api.http_params or [])
@@ -326,17 +328,22 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
     # 组装与渲染动态 Body
     rendered_body = render_macro_string(api_http_body, auth_token=auth_token) if api_http_body else None
 
-    # 计算目标 URL
-    scheme = "https" if machine_port == 443 else "http"
+    # 计算目标 URL (优先使用接口自定义 base_url，次优先使用机器基准 base_url，否则降级使用机器宿主地址)
     rendered_path = render_macro_string(api_http_path, auth_token=auth_token)
     if not rendered_path.startswith("/"):
         rendered_path = "/" + rendered_path
 
-    url = (
-        f"{scheme}://{machine_host}:{machine_port}{rendered_path}"
-        if machine_port not in [80, 443]
-        else f"{scheme}://{machine_host}{rendered_path}"
-    )
+    effective_base = api_base_url or machine_base_url
+    if effective_base and effective_base.strip():
+        base_clean = effective_base.strip().rstrip('/')
+        url = f"{base_clean}{rendered_path}"
+    else:
+        scheme = "https" if machine_port == 443 else "http"
+        url = (
+            f"{scheme}://{machine_host}:{machine_port}{rendered_path}"
+            if machine_port not in [80, 443]
+            else f"{scheme}://{machine_host}{rendered_path}"
+        )
 
     http_ok, http_code, http_ms, json_data, http_err = await check_http(
         url,

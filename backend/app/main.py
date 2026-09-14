@@ -180,6 +180,7 @@ def update_environment(id: int, data: Environment, session: Session = Depends(ge
             session.add(t)
     env.name = data.name
     env.description = data.description
+    env.base_url = data.base_url
     env.order_num = data.order_num
     session.add(env)
     session.commit()
@@ -269,6 +270,7 @@ class MachinePayload(BaseModel):
     name: str
     host: str
     port: int
+    base_url: Optional[str] = None # 机器默认服务基准地址 (如 https://api.prod.com 或 http://192.168.1.10:8080)
     environment_id: Optional[int] = None
     group_id: Optional[int] = None
     cron_interval_minutes: int = 5
@@ -302,6 +304,7 @@ def list_machines(environment_id: Optional[int] = None, group_id: Optional[int] 
             "name": m.name,
             "host": m.host,
             "port": m.port,
+            "base_url": m.base_url,
             "cron_interval_minutes": m.cron_interval_minutes,
             "is_active": m.is_active,
             "retry_threshold": m.retry_threshold,
@@ -355,6 +358,7 @@ def create_machine(data: MachinePayload, session: Session = Depends(get_session)
         name=data.name,
         host=data.host,
         port=data.port,
+        base_url=data.base_url.strip() if data.base_url and data.base_url.strip() else None,
         cron_interval_minutes=data.cron_interval_minutes,
         is_active=data.is_active,
         retry_threshold=data.retry_threshold,
@@ -374,6 +378,7 @@ def create_machine(data: MachinePayload, session: Session = Depends(get_session)
         "name": machine.name,
         "host": machine.host,
         "port": machine.port,
+        "base_url": machine.base_url,
         "cron_interval_minutes": machine.cron_interval_minutes,
         "is_active": machine.is_active,
         "current_status": machine.current_status,
@@ -409,6 +414,7 @@ def update_machine(id: int, data: MachinePayload, session: Session = Depends(get
     machine.name = data.name
     machine.host = data.host
     machine.port = data.port
+    machine.base_url = data.base_url.strip() if data.base_url and data.base_url.strip() else None
     machine.cron_interval_minutes = data.cron_interval_minutes
     machine.is_active = data.is_active
     machine.email_receivers = data.email_receivers
@@ -425,6 +431,7 @@ def update_machine(id: int, data: MachinePayload, session: Session = Depends(get
         "name": machine.name,
         "host": machine.host,
         "port": machine.port,
+        "base_url": machine.base_url,
         "cron_interval_minutes": machine.cron_interval_minutes,
         "is_active": machine.is_active,
         "current_status": machine.current_status,
@@ -465,6 +472,7 @@ async def trigger_machine_probe(id: int):
 class ApiPayload(BaseModel):
     machine_id: int
     name: str
+    base_url: Optional[str] = None
     http_path: str = "/health"
     http_method: str = "GET"
     http_params: List[Dict[str, Any]] = []
@@ -483,6 +491,7 @@ class ApiPayload(BaseModel):
 
 class ApiTestRunPayload(BaseModel):
     machine_id: int
+    base_url: Optional[str] = None
     http_method: str = "GET"
     http_path: str = "/health"
     http_params: List[Dict[str, Any]] = []
@@ -520,12 +529,17 @@ def list_apis(
         scheme = "https" if port == 443 else "http"
         port_str = f":{port}" if port not in [80, 443] else ""
         path = a.http_path if a.http_path.startswith("/") else f"/{a.http_path}"
-        full_url = f"{scheme}://{host}{port_str}{path}"
+        effective_base = a.base_url or (m.base_url if m else None)
+        if effective_base and effective_base.strip():
+            full_url = f"{effective_base.strip().rstrip('/')}{path}"
+        else:
+            full_url = f"{scheme}://{host}{port_str}{path}"
         
         result.append({
             "id": a.id,
             "machine_id": a.machine_id,
             "name": a.name,
+            "base_url": a.base_url,
             "http_path": a.http_path,
             "http_method": a.http_method,
             "http_params": a.http_params or [],
@@ -590,16 +604,20 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
     req_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
     rendered_body = render_macro_string(data.http_body, auth_token=auth_token) if data.http_body else None
 
-    scheme = "https" if machine.port == 443 else "http"
     rendered_path = render_macro_string(data.http_path, auth_token=auth_token)
     if not rendered_path.startswith("/"):
         rendered_path = "/" + rendered_path
 
-    url = (
-        f"{scheme}://{machine.host}:{machine.port}{rendered_path}"
-        if machine.port not in [80, 443]
-        else f"{scheme}://{machine.host}{rendered_path}"
-    )
+    effective_base = data.base_url or (machine.base_url if machine else None)
+    if effective_base and effective_base.strip():
+        url = f"{effective_base.strip().rstrip('/')}{rendered_path}"
+    else:
+        scheme = "https" if machine.port == 443 else "http"
+        url = (
+            f"{scheme}://{machine.host}:{machine.port}{rendered_path}"
+            if machine.port not in [80, 443]
+            else f"{scheme}://{machine.host}{rendered_path}"
+        )
 
     from app.services.probe_service import check_http, check_schema
     http_ok, http_code, http_ms, json_data, http_err = await check_http(
@@ -629,6 +647,7 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         "schema_matched": schema_matched,
         "schema_errors": schema_errors,
         "request_url": url,
+        "resolved_url": url,
         "rendered_headers": req_headers,
         "rendered_params": req_params
     }
@@ -643,6 +662,7 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
     api = ApiProbe(
         machine_id=data.machine_id,
         name=data.name,
+        base_url=data.base_url,
         http_path=data.http_path,
         http_method=data.http_method,
         http_params=data.http_params,
@@ -688,11 +708,16 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
     scheme = "https" if machine.port == 443 else "http"
     port_str = f":{machine.port}" if machine.port not in [80, 443] else ""
     path = api.http_path if api.http_path.startswith("/") else f"/{api.http_path}"
+    if api.base_url and api.base_url.strip():
+        full_url = f"{api.base_url.strip().rstrip('/')}{path}"
+    else:
+        full_url = f"{scheme}://{machine.host}{port_str}{path}"
     
     return {
         "id": api.id,
         "machine_id": api.machine_id,
         "name": api.name,
+        "base_url": api.base_url,
         "http_path": api.http_path,
         "http_method": api.http_method,
         "http_params": api.http_params or [],
@@ -710,7 +735,7 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         "machine_port": machine.port,
         "environment_id": env.id if env else None,
         "environment_name": env.name if env else "默认环境",
-        "full_url": f"{scheme}://{machine.host}{port_str}{path}"
+        "full_url": full_url
     }
 
 
@@ -727,6 +752,7 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     old_name = api.name
     api.machine_id = data.machine_id
     api.name = data.name
+    api.base_url = data.base_url
     api.http_path = data.http_path
     api.http_method = data.http_method
     api.http_params = data.http_params
@@ -764,11 +790,16 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     scheme = "https" if machine.port == 443 else "http"
     port_str = f":{machine.port}" if machine.port not in [80, 443] else ""
     path = api.http_path if api.http_path.startswith("/") else f"/{api.http_path}"
+    if api.base_url and api.base_url.strip():
+        full_url = f"{api.base_url.strip().rstrip('/')}{path}"
+    else:
+        full_url = f"{scheme}://{machine.host}{port_str}{path}"
     
     return {
         "id": api.id,
         "machine_id": api.machine_id,
         "name": api.name,
+        "base_url": api.base_url,
         "http_path": api.http_path,
         "http_method": api.http_method,
         "http_params": api.http_params or [],
@@ -786,7 +817,7 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
         "machine_port": machine.port,
         "environment_id": env.id if env else None,
         "environment_name": env.name if env else "默认环境",
-        "full_url": f"{scheme}://{machine.host}{port_str}{path}"
+        "full_url": full_url
     }
 
 

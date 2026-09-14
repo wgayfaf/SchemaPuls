@@ -14,6 +14,7 @@ class Environment(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=64, unique=True, index=True)
     description: Optional[str] = Field(default=None, max_length=255)
+    base_url: Optional[str] = Field(default=None, max_length=255) # 环境默认前置服务 URL (如 https://api.example.com)
     order_num: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -38,6 +39,7 @@ class MachineNode(SQLModel, table=True):
     name: str = Field(max_length=64, index=True)
     host: str = Field(max_length=255, index=True)       # IP 或域名
     port: int = Field(index=True)                       # TCP 端口
+    base_url: Optional[str] = Field(default=None, max_length=255) # 机器服务基准地址 (如 https://api.prod.com 或 http://192.168.1.10:8080)
     cron_interval_minutes: int = Field(default=5)       # 端口探活周期
     is_active: bool = Field(default=True)
     
@@ -62,6 +64,7 @@ class ApiProbe(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     machine_id: int = Field(foreign_key="machine_nodes.id", index=True)
     name: str = Field(max_length=64, index=True)
+    base_url: Optional[str] = Field(default=None, max_length=255) # 自定义前置基准地址 (如 https://api.prod.com，优先于宿主机器地址)
     http_path: str = Field(default="/health")           # 业务接口路径
     http_method: str = Field(default="GET")
     http_params: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 查询参数列表

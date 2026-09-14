@@ -75,6 +75,7 @@ const app = createApp({
             name: "",
             host: "",
             port: 80,
+            base_url: "",
             cron_interval_minutes: 5,
             email_input: "admin@company.com"
         });
@@ -94,6 +95,7 @@ const app = createApp({
         const apiForm = ref({
             machine_id: null,
             name: "",
+            base_url: "",
             http_path: "/get",
             http_method: "GET",
             cron_interval_minutes: 5,
@@ -339,7 +341,7 @@ const app = createApp({
             });
         });
 
-        // 机器管理计算指标与过滤列表
+        // 全局机器指标 (供 Dashboard 看板使用)
         const onlineMachineCount = computed(() => {
             return machineList.value.filter(m => m.current_status === "ONLINE" || m.current_status === "DEGRADED").length;
         });
@@ -355,11 +357,40 @@ const app = createApp({
             return (sum / valid.length).toFixed(1);
         });
 
-        const filteredMachines = computed(() => {
-            let list = machineList.value;
-            if (selectedMachineEnv.value !== "ALL") {
-                list = list.filter(m => m.environment_name === selectedMachineEnv.value);
+        // 机器管理专属：按选定环境筛选的机器集合 (当选全部环境时显示全部)
+        const currentEnvMachinesForKpi = computed(() => {
+            if (selectedMachineEnv.value === "ALL") {
+                return machineList.value;
             }
+            return machineList.value.filter(m => {
+                if (m.environment_name === selectedMachineEnv.value) return true;
+                const env = environmentList.value.find(e => e.name === selectedMachineEnv.value);
+                return env && m.environment_id === env.id;
+            });
+        });
+
+        // 机器管理专属：按环境动态联动的 4 项 KPI 指标
+        const machineEnvTotalCount = computed(() => {
+            return currentEnvMachinesForKpi.value.length;
+        });
+
+        const machineEnvOnlineCount = computed(() => {
+            return currentEnvMachinesForKpi.value.filter(m => m.current_status === "ONLINE" || m.current_status === "DEGRADED").length;
+        });
+
+        const machineEnvOfflineCount = computed(() => {
+            return currentEnvMachinesForKpi.value.filter(m => m.current_status === "OFFLINE").length;
+        });
+
+        const machineEnvAvgTcpLatency = computed(() => {
+            const valid = currentEnvMachinesForKpi.value.filter(m => m.last_tcp_latency_ms && m.last_tcp_latency_ms > 0);
+            if (valid.length === 0) return 0;
+            const sum = valid.reduce((acc, cur) => acc + cur.last_tcp_latency_ms, 0);
+            return (sum / valid.length).toFixed(1);
+        });
+
+        const filteredMachines = computed(() => {
+            let list = currentEnvMachinesForKpi.value;
             if (machineSearchQuery.value && machineSearchQuery.value.trim()) {
                 const q = machineSearchQuery.value.toLowerCase().trim();
                 list = list.filter(m => 
@@ -377,7 +408,7 @@ const app = createApp({
             return machineList.value.filter(m => m.environment_name === form.value.group_name);
         });
 
-        // 接口管理专属计算属性
+        // 全局接口指标 (供 Dashboard 看板使用)
         const healthyApiCount = computed(() => {
             return apiList.value.filter(a => a.current_status === "HEALTHY").length;
         });
@@ -397,14 +428,51 @@ const app = createApp({
             if (selectedApiEnv.value === "ALL") {
                 return machineList.value;
             }
-            return machineList.value.filter(m => m.environment_name === selectedApiEnv.value);
+            return machineList.value.filter(m => {
+                if (m.environment_name === selectedApiEnv.value) return true;
+                const env = environmentList.value.find(e => e.name === selectedApiEnv.value);
+                return env && m.environment_id === env.id;
+            });
+        });
+
+        // 接口管理专属：按选定环境筛选的接口集合 (当选全部环境时显示全部)
+        const currentEnvApisForKpi = computed(() => {
+            if (selectedApiEnv.value === "ALL") {
+                return apiList.value;
+            }
+            return apiList.value.filter(a => {
+                if (a.environment_name === selectedApiEnv.value) return true;
+                const env = environmentList.value.find(e => e.name === selectedApiEnv.value);
+                return env && a.environment_id === env.id;
+            });
+        });
+
+        // 接口管理专属：按环境动态联动的 5 项核心指标
+        const apiEnvTotalCount = computed(() => {
+            return currentEnvApisForKpi.value.length;
+        });
+
+        const apiEnvOnlineMachineCount = computed(() => {
+            return currentEnvMachineOptions.value.filter(m => m.current_status === "ONLINE" || m.current_status === "DEGRADED").length;
+        });
+
+        const apiEnvHealthyCount = computed(() => {
+            return currentEnvApisForKpi.value.filter(a => a.current_status === "HEALTHY").length;
+        });
+
+        const apiEnvIssueCount = computed(() => {
+            return currentEnvApisForKpi.value.filter(a => a.current_status === "DOWN" || a.current_status === "DEGRADED" || a.current_status === "CIRCUIT_BROKEN").length;
+        });
+
+        const apiEnvAvgLatency = computed(() => {
+            const valid = currentEnvApisForKpi.value.filter(a => a.last_http_latency_ms && a.last_http_latency_ms > 0);
+            if (valid.length === 0) return 0;
+            const sum = valid.reduce((acc, cur) => acc + cur.last_http_latency_ms, 0);
+            return (sum / valid.length).toFixed(1);
         });
 
         const filteredApis = computed(() => {
-            let list = apiList.value;
-            if (selectedApiEnv.value !== "ALL") {
-                list = list.filter(a => a.environment_name === selectedApiEnv.value);
-            }
+            let list = currentEnvApisForKpi.value;
             if (selectedApiMachine.value !== "ALL") {
                 list = list.filter(a => a.machine_id === selectedApiMachine.value);
             }
@@ -726,6 +794,7 @@ const app = createApp({
                 name: "",
                 host: "",
                 port: 80,
+                base_url: "",
                 cron_interval_minutes: 5,
                 email_input: "admin@company.com"
             };
@@ -739,6 +808,7 @@ const app = createApp({
                 name: row.name || "",
                 host: row.host || "",
                 port: row.port || 80,
+                base_url: row.base_url || "",
                 cron_interval_minutes: row.cron_interval_minutes || 5,
                 email_input: (row.email_receivers && Array.isArray(row.email_receivers))
                     ? row.email_receivers.join(", ")
@@ -775,6 +845,7 @@ const app = createApp({
                     name: machineForm.value.name.trim(),
                     host: machineForm.value.host.trim(),
                     port: machineForm.value.port,
+                    base_url: machineForm.value.base_url ? machineForm.value.base_url.trim() : null,
                     environment_id: machineForm.value.environment_id,
                     cron_interval_minutes: machineForm.value.cron_interval_minutes || 5,
                     is_active: true,
@@ -845,11 +916,56 @@ const app = createApp({
         };
 
         // 接口管理 Postman 风格工作台方法与 CRUD
-        const selectedMachineHost = computed(() => {
+        const selectedMachineDisplayName = computed(() => {
+            if (!apiForm.value.machine_id) return "未选择归属机器节点";
+            const m = machineList.value.find(item => item.id === apiForm.value.machine_id);
+            if (!m) return "未知节点";
+            return `${m.name} (${m.host}:${m.port})`;
+        });
+
+        const selectedMachineBaseUrl = computed(() => {
             if (!apiForm.value.machine_id) return "http://host:port";
             const m = machineList.value.find(item => item.id === apiForm.value.machine_id);
             if (!m) return "http://host:port";
-            return `http://${m.host}:${m.port}`;
+            if (m.base_url && m.base_url.trim()) return m.base_url.trim();
+            const scheme = m.port === 443 ? "https" : "http";
+            return (m.port === 80 || m.port === 443) ? `${scheme}://${m.host}` : `${scheme}://${m.host}:${m.port}`;
+        });
+
+        const selectedMachineHost = selectedMachineBaseUrl;
+
+        const resetBaseUrlToMachine = () => {
+            apiForm.value.base_url = selectedMachineBaseUrl.value;
+            ElementPlus.ElMessage.success(`已恢复为当前机器默认地址: ${selectedMachineBaseUrl.value}`);
+        };
+
+        const onPathInput = (val) => {
+            if (!val) return;
+            const trimmed = String(val).trim();
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                try {
+                    const urlObj = new URL(trimmed);
+                    apiForm.value.base_url = urlObj.origin;
+                    apiForm.value.http_path = (urlObj.pathname || "/") + urlObj.search + urlObj.hash;
+                    syncPathToParams(apiForm.value.http_path);
+                    ElementPlus.ElMessage.info("已智能拆分完整 URL 为基准地址与相对路径");
+                } catch (e) {
+                    // 忽略输入过程中的格式异常
+                }
+            }
+        };
+
+        // 监听机器选择变动，自动同步更新 Base URL 为该机器配置的基准地址
+        watch(() => apiForm.value.machine_id, (newMId) => {
+            if (!newMId) return;
+            const m = machineList.value.find(item => item.id === newMId);
+            if (!m) return;
+            if (m.base_url && m.base_url.trim()) {
+                apiForm.value.base_url = m.base_url.trim();
+            } else {
+                const scheme = m.port === 443 ? "https" : "http";
+                apiForm.value.base_url = (m.port === 80 || m.port === 443) ? `${scheme}://${m.host}` : `${scheme}://${m.host}:${m.port}`;
+            }
         });
 
         let isSyncingUrlParams = false;
@@ -973,9 +1089,23 @@ const app = createApp({
                     mId = machineList.value[0].id;
                 }
             }
+            let initialBaseUrl = "";
+            if (mId) {
+                const m = machineList.value.find(item => item.id === mId);
+                if (m) {
+                    if (m.base_url && m.base_url.trim()) {
+                        initialBaseUrl = m.base_url.trim();
+                    } else {
+                        const scheme = m.port === 443 ? "https" : "http";
+                        initialBaseUrl = (m.port === 80 || m.port === 443) ? `${scheme}://${m.host}` : `${scheme}://${m.host}:${m.port}`;
+                    }
+                }
+            }
+
             apiForm.value = {
                 machine_id: mId,
                 name: "",
+                base_url: initialBaseUrl,
                 http_path: "/get",
                 http_method: "GET",
                 cron_interval_minutes: 5,
@@ -1015,9 +1145,24 @@ const app = createApp({
 
         const openEditApiDialog = (row) => {
             editingApiId.value = row.id;
+
+            let initialBaseUrl = row.base_url || "";
+            if (!initialBaseUrl && row.machine_id) {
+                const m = machineList.value.find(item => item.id === row.machine_id);
+                if (m) {
+                    if (m.base_url && m.base_url.trim()) {
+                        initialBaseUrl = m.base_url.trim();
+                    } else {
+                        const scheme = m.port === 443 ? "https" : "http";
+                        initialBaseUrl = (m.port === 80 || m.port === 443) ? `${scheme}://${m.host}` : `${scheme}://${m.host}:${m.port}`;
+                    }
+                }
+            }
+
             apiForm.value = {
                 machine_id: row.machine_id,
                 name: row.name || "",
+                base_url: initialBaseUrl,
                 http_path: row.http_path || "/get",
                 http_method: row.http_method || "GET",
                 cron_interval_minutes: row.cron_interval_minutes || 5,
@@ -1122,6 +1267,7 @@ const app = createApp({
             try {
                 const testPayload = {
                     machine_id: apiForm.value.machine_id,
+                    base_url: apiForm.value.base_url ? apiForm.value.base_url.trim() : null,
                     http_method: apiForm.value.http_method,
                     http_path: apiForm.value.http_path.trim(),
                     http_params: apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim()),
@@ -1205,6 +1351,7 @@ const app = createApp({
             const payload = {
                 machine_id: apiForm.value.machine_id,
                 name: apiForm.value.name.trim(),
+                base_url: apiForm.value.base_url ? apiForm.value.base_url.trim() : null,
                 http_path: apiForm.value.http_path.trim(),
                 http_method: apiForm.value.http_method,
                 expected_schema: parsedSchema,
@@ -1821,6 +1968,10 @@ const app = createApp({
             onlineMachineCount,
             offlineMachineCount,
             avgTcpLatency,
+            machineEnvTotalCount,
+            machineEnvOnlineCount,
+            machineEnvOfflineCount,
+            machineEnvAvgTcpLatency,
             filteredMachines,
             openCreateMachineDialog,
             openEditMachineDialog,
@@ -1846,6 +1997,11 @@ const app = createApp({
             healthyApiCount,
             issueApiCount,
             avgApiLatency,
+            apiEnvTotalCount,
+            apiEnvOnlineMachineCount,
+            apiEnvHealthyCount,
+            apiEnvIssueCount,
+            apiEnvAvgLatency,
             currentEnvMachineOptions,
             filteredApis,
             openCreateApiDialog,
@@ -1866,7 +2022,11 @@ const app = createApp({
             apiAuthConfig,
             apiTestRunning,
             apiTestResult,
+            selectedMachineDisplayName,
+            selectedMachineBaseUrl,
             selectedMachineHost,
+            resetBaseUrlToMachine,
+            onPathInput,
             addParamRow,
             removeParamRow,
             addHeaderRow,

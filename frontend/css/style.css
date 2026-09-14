@@ -593,18 +593,26 @@
         .pm-method-delete { color: #ef4444 !important; font-weight: 700; }
         .pm-method-patch { color: #8b5cf6 !important; font-weight: 700; }
 
-        .pm-host-prefix {
-            background: #f1f5f9;
-            color: #475569;
-            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-            font-size: 12px;
-            padding: 9px 12px;
-            border-right: 1px solid #e2e8f0;
-            white-space: nowrap;
-            user-select: none;
+        .pm-baseurl-wrapper {
+            width: 330px;
+            border-right: 1.5px solid #e2e8f0;
+            background: #f8fafc;
             display: flex;
             align-items: center;
-            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .pm-baseurl-wrapper:focus-within {
+            background: #ffffff;
+        }
+
+        .pm-baseurl-input .el-input__wrapper {
+            box-shadow: none !important;
+            background: transparent;
+            border-radius: 0;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            font-size: 12.5px;
+            padding: 8px 10px;
         }
 
         .pm-path-input {

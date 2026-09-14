@@ -318,26 +318,6 @@
 
                 <!-- 视图: 环境管理 (Environment Management) -->
                 <div v-show="currentNav === 'env_management'">
-                    <!-- 顶部环境与节点指标卡片 -->
-                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
-                        <div class="kpi-box">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">托管环境总数</div>
-                            <div class="kpi-num">{{ environmentList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Envs</span></div>
-                        </div>
-                        <div class="kpi-box kpi-info">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">纳管监控节点</div>
-                            <div class="kpi-num" style="color: #0284c7;">{{ targets.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
-                        </div>
-                        <div class="kpi-box kpi-success">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">正常运行服务</div>
-                            <div class="kpi-num" style="color: #059669;">{{ summary.healthy_count || 0 }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
-                        </div>
-                        <div class="kpi-box kpi-danger">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">告警与降级节点</div>
-                            <div class="kpi-num" style="color: #dc2626;">{{ (summary.down_count || 0) + (summary.degraded_count || 0) }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Issues</span></div>
-                        </div>
-                    </div>
-
                     <!-- 环境资产管理表格卡片 -->
                     <div class="wb-card">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
@@ -387,7 +367,7 @@
                                     <el-tag size="small" effect="plain" type="info">{{ row.order_num }}</el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="名下监控目标" width="160" align="center">
+                            <el-table-column label="名下机器节点" width="160" align="center">
                                 <template #default="{ row }">
                                     <el-button size="small" type="primary" link @click="goToEnvMachines(row.name)">
                                         <i class="fa-solid fa-server" style="margin-right: 4px;"></i>{{ getEnvMachineCount(row.id, row.name) }} 台机器
@@ -423,23 +403,35 @@
 
                 <!-- 视图: 机器管理 (Machine Management) -->
                 <div v-show="currentNav === 'machine_management'">
-                    <!-- 顶部机器与运行指标卡片 -->
+                    <!-- 顶部机器与运行指标卡片 (支持根据选定环境动态联动) -->
                     <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
                         <div class="kpi-box">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">托管机器总数</div>
-                            <div class="kpi-num">{{ machineList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>托管机器总数</span>
+                                <el-tag v-if="selectedMachineEnv !== 'ALL'" size="small" type="primary" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedMachineEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num">{{ machineEnvTotalCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Nodes</span></div>
                         </div>
                         <div class="kpi-box kpi-success">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">在线运行节点</div>
-                            <div class="kpi-num" style="color: #059669;">{{ onlineMachineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Online</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>在线运行节点</span>
+                                <el-tag v-if="selectedMachineEnv !== 'ALL'" size="small" type="success" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedMachineEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #059669;">{{ machineEnvOnlineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Online</span></div>
                         </div>
                         <div class="kpi-box kpi-danger">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">离线/异常节点</div>
-                            <div class="kpi-num" style="color: #dc2626;">{{ offlineMachineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Down</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>离线/异常节点</span>
+                                <el-tag v-if="selectedMachineEnv !== 'ALL'" size="small" type="danger" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedMachineEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ machineEnvOfflineCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Down</span></div>
                         </div>
                         <div class="kpi-box kpi-info">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">平均 TCP 握手耗时</div>
-                            <div class="kpi-num" style="color: #0284c7;">{{ avgTcpLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>平均 TCP 握手耗时</span>
+                                <el-tag v-if="selectedMachineEnv !== 'ALL'" size="small" type="info" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedMachineEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #0284c7;">{{ machineEnvAvgTcpLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
                         </div>
                     </div>
 
@@ -492,9 +484,19 @@
                                     </el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="网络访问地址" min-width="180">
+                            <el-table-column label="网络访问地址" min-width="170">
                                 <template #default="{ row }">
                                     <span class="code-pill">{{ row.host }}:{{ row.port }}</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="服务基准地址 (Base URL)" min-width="230">
+                                <template #default="{ row }">
+                                    <span v-if="row.base_url" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0284c7; background: #f0f9ff; padding: 2px 8px; border-radius: 4px; border: 1px solid #bae6fd;">
+                                        <i class="fa-solid fa-globe" style="margin-right: 4px; font-size: 11px;"></i>{{ row.base_url }}
+                                    </span>
+                                    <span v-else style="color: #94a3b8; font-size: 12px; font-style: italic;">
+                                        默认 (http://{{ row.host }}:{{ row.port }})
+                                    </span>
                                 </template>
                             </el-table-column>
                             <el-table-column label="TCP 探活状态" width="130" align="center">
@@ -557,23 +559,35 @@
 
                 <!-- 视图: 接口管理 (API Probe Management) -->
                 <div v-show="currentNav === 'api_management'">
-                    <!-- 顶部接口指标卡片 -->
+                    <!-- 顶部接口指标卡片 (支持根据选定环境动态联动) -->
                     <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
                         <div class="kpi-box">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">纳管接口总数</div>
-                            <div class="kpi-num">{{ apiList.length }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">APIs</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>纳管接口总数</span>
+                                <el-tag v-if="selectedApiEnv !== 'ALL'" size="small" type="primary" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedApiEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num">{{ apiEnvTotalCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">APIs</span></div>
                         </div>
                         <div class="kpi-box kpi-success">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">契约与运行正常</div>
-                            <div class="kpi-num" style="color: #059669;">{{ healthyApiCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>契约与运行正常</span>
+                                <el-tag v-if="selectedApiEnv !== 'ALL'" size="small" type="success" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedApiEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #059669;">{{ apiEnvHealthyCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Healthy</span></div>
                         </div>
                         <div class="kpi-box kpi-danger">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">异常/熔断挂起</div>
-                            <div class="kpi-num" style="color: #dc2626;">{{ issueApiCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Issues</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>异常/熔断挂起</span>
+                                <el-tag v-if="selectedApiEnv !== 'ALL'" size="small" type="danger" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedApiEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #dc2626;">{{ apiEnvIssueCount }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">Issues</span></div>
                         </div>
                         <div class="kpi-box kpi-info">
-                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">平均 HTTP 响应延迟</div>
-                            <div class="kpi-num" style="color: #8b5cf6;">{{ avgApiLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between; align-items: center;">
+                                <span>平均 HTTP 响应延迟</span>
+                                <el-tag v-if="selectedApiEnv !== 'ALL'" size="small" type="info" effect="plain" style="font-size: 10.5px; height: 18px; padding: 0 5px;">{{ selectedApiEnv }}</el-tag>
+                            </div>
+                            <div class="kpi-num" style="color: #8b5cf6;">{{ apiEnvAvgLatency }} <span style="font-size: 12px; color: #64748b; font-weight: normal;">ms</span></div>
                         </div>
                     </div>
 
@@ -1219,6 +1233,14 @@ export SMTP_USE_SSL="true"
                         </el-form-item>
                     </el-col>
                 </el-row>
+                <el-form-item label="服务基准地址">
+                    <el-input v-model="machineForm.base_url" placeholder="例如: https://api.prod.com 或 http://192.168.1.10:8080 (选填)">
+                        <template #prefix><i class="fa-solid fa-globe" style="color: #64748b;"></i></template>
+                    </el-input>
+                    <div style="font-size: 11.5px; color: #64748b; line-height: 1.4; margin-top: 4px;">
+                        选填。该机器节点对外暴露的前置服务基准 URL（支持 http/https、域名或 IP 端口）。名下接口将默认继承此基准地址。
+                    </div>
+                </el-form-item>
                 <el-form-item label="探活周期(分)">
                     <el-input-number v-model="machineForm.cron_interval_minutes" :min="1" :max="60" style="width: 140px;"></el-input-number>
                     <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">后台定时探测 TCP 端口开放情况</span>
@@ -1273,6 +1295,32 @@ export SMTP_USE_SSL="true"
                 </el-row>
             </div>
 
+            <!-- 宿主机器前置服务基准地址提示与同步条 -->
+            <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 12px; border: 1px solid #e2e8f0;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 600; color: #475569;">
+                        <i class="fa-solid fa-server" style="color: #0284c7; margin-right: 4px;"></i>宿主机器:
+                    </span>
+                    <span style="font-weight: 600; color: #0f172a;">
+                        {{ selectedMachineDisplayName }}
+                    </span>
+                    <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+                    <span style="color: #64748b;">
+                        机器默认地址:
+                        <code style="background: #e2e8f0; color: #0284c7; padding: 2px 6px; border-radius: 4px; font-family: monospace;">{{ selectedMachineBaseUrl }}</code>
+                    </span>
+                    <el-tooltip content="点击将当前宿主机器的默认基准地址同步填入下方输入框" placement="top">
+                        <el-button size="small" link type="primary" @click="resetBaseUrlToMachine">
+                            <i class="fa-solid fa-rotate-left" style="margin-right: 2px;"></i>恢复机器地址
+                        </el-button>
+                    </el-tooltip>
+                </div>
+                <div style="color: #64748b; font-size: 11.5px; display: flex; align-items: center; gap: 4px;">
+                    <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i>
+                    <span>基准地址可自主修改 (支持 http/https、域名与端口)，亦可直接在路径栏粘贴完整 URL 自动拆分</span>
+                </div>
+            </div>
+
             <!-- Postman 顶部 URL 请求栏 -->
             <div class="pm-url-bar">
                 <el-select v-model="apiForm.http_method" class="pm-method-select" :class="'pm-method-' + apiForm.http_method.toLowerCase()">
@@ -1282,11 +1330,23 @@ export SMTP_USE_SSL="true"
                     <el-option label="DELETE" value="DELETE" class="pm-method-delete"></el-option>
                     <el-option label="PATCH" value="PATCH" class="pm-method-patch"></el-option>
                 </el-select>
-                <div class="pm-host-prefix" :title="'宿主基础地址: ' + selectedMachineHost">
-                    <i class="fa-solid fa-server" style="color: #64748b;"></i>
-                    <span>{{ selectedMachineHost }}</span>
+                <div class="pm-baseurl-wrapper" title="当前接口的前置服务基准地址 (支持 http:// 或 https://、域名或IP及端口)">
+                    <el-input 
+                        v-model="apiForm.base_url" 
+                        class="pm-baseurl-input" 
+                        placeholder="http://host:port 或 https://api.domain.com"
+                        clearable>
+                        <template #prefix>
+                            <i class="fa-solid fa-globe" style="color: #64748b; font-size: 12px; margin-right: 2px;"></i>
+                        </template>
+                    </el-input>
                 </div>
-                <el-input v-model="apiForm.http_path" class="pm-path-input" placeholder="/api/v1/resource?query=val"></el-input>
+                <el-input 
+                    v-model="apiForm.http_path" 
+                    class="pm-path-input" 
+                    placeholder="/api/v1/resource?query=val (支持直接粘贴完整URL)"
+                    @input="onPathInput">
+                </el-input>
                 <el-button type="primary" class="pm-send-btn" @click="handleTestRunApi" :loading="apiTestRunning">
                     <i class="fa-solid fa-paper-plane"></i>
                     <span>发送调试</span>

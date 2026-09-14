@@ -55,6 +55,7 @@ def init_db():
                 pass  # 若字段已存在则忽略异常
 
         api_columns_to_add = [
+            ("base_url", "VARCHAR(255)"),
             ("http_params", "TEXT DEFAULT '[]'"),
             ("http_body_type", "VARCHAR(32) DEFAULT 'none'"),
             ("http_body", "TEXT"),
@@ -64,6 +65,26 @@ def init_db():
         for col_name, col_def in api_columns_to_add:
             try:
                 conn.execute(text(f"ALTER TABLE api_probes ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
+
+        env_columns_to_add = [
+            ("base_url", "VARCHAR(255)"),
+        ]
+        for col_name, col_def in env_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE environments ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
+
+        machine_columns_to_add = [
+            ("base_url", "VARCHAR(255)"),
+        ]
+        for col_name, col_def in machine_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE machine_nodes ADD COLUMN {col_name} {col_def}"))
                 conn.commit()
             except Exception:
                 pass
