@@ -28,6 +28,7 @@ const { createApp, ref, computed, onMounted, nextTick } = Vue;
 const app = createApp({
     setup() {
         const loading = ref(false);
+        const lastRefreshTime = ref(new Date().toLocaleTimeString());
         const targets = ref([]);
         const groupList = ref([]);
         const selectedGroup = ref("ALL");
@@ -233,6 +234,89 @@ const app = createApp({
             );
         });
 
+        // 全局监控大盘 - 严格基于【环境管理】(environmentList) 进行纳管分类与态势数据聚合
+        const dashboardEnvironments = computed(() => {
+            // 严格只纳管【环境管理】中配置的真实环境，严禁无主历史脏数据渗透
+            const envs = [...environmentList.value].sort((a, b) => (a.order_num || 0) - (b.order_num || 0));
+
+            return envs.map(env => {
+                // 1. 严格过滤属于该环境的机器 (通过 environment_id 或 environment_name 精确匹配)
+                const envMachines = machineList.value.filter(m => 
+                    (m.environment_id != null && m.environment_id === env.id) || 
+                    (m.environment_name && m.environment_name === env.name)
+                );
+                const machineTotal = envMachines.length;
+                const machineOnline = envMachines.filter(m => m.current_status === "ONLINE" || m.last_tcp_ok === true).length;
+                const machineOffline = envMachines.filter(m => m.current_status === "OFFLINE" || m.current_status === "DEGRADED" || m.last_tcp_ok === false).length;
+                
+                const validTcp = envMachines.filter(m => m.last_tcp_latency_ms && m.last_tcp_latency_ms > 0);
+                const avgTcp = validTcp.length > 0
+                    ? (validTcp.reduce((acc, cur) => acc + cur.last_tcp_latency_ms, 0) / validTcp.length).toFixed(1)
+                    : null;
+
+                // 2. 严格过滤属于该环境的接口 (机器下属接口或直属环境接口)
+                const machineIds = new Set(envMachines.map(m => m.id));
+                const envApis = apiList.value.filter(a => 
+                    (a.environment_id != null && a.environment_id === env.id) ||
+                    (a.environment_name && a.environment_name === env.name) ||
+                    (a.machine_id != null && machineIds.has(a.machine_id))
+                );
+
+                const apiTotal = envApis.length;
+                const apiHealthy = envApis.filter(a => a.current_status === "HEALTHY").length;
+                const apiDown = envApis.filter(a => a.current_status === "DOWN" || a.current_status === "DEGRADED").length;
+                const apiCircuitBroken = envApis.filter(a => a.current_status === "CIRCUIT_BROKEN" || a.circuit_broken).length;
+
+                const validHttp = envApis.filter(a => a.last_latency_ms && a.last_latency_ms > 0);
+                const avgHttp = validHttp.length > 0
+                    ? (validHttp.reduce((acc, cur) => acc + cur.last_latency_ms, 0) / validHttp.length).toFixed(0)
+                    : null;
+
+                // 3. 可用率与健康等级计算
+                let slaRate = 0;
+                let status = "EMPTY";
+
+                if (machineTotal === 0) {
+                    // 环境下没有纳管机器时，可用率不应为 100%，归零并标识为未接入
+                    slaRate = 0;
+                    status = "EMPTY";
+                } else {
+                    const totalItems = machineTotal + apiTotal;
+                    const healthyItems = machineOnline + apiHealthy;
+                    slaRate = Math.round((healthyItems / totalItems) * 100);
+
+                    // 4. 环境健康等级判定
+                    if (machineOffline > 0 || apiDown > 0) {
+                        status = "DOWN";
+                    } else if (apiCircuitBroken > 0) {
+                        status = "DEGRADED";
+                    } else {
+                        status = "HEALTHY";
+                    }
+                }
+
+                return {
+                    id: env.id,
+                    name: env.name,
+                    description: env.description,
+                    order_num: env.order_num || 0,
+                    status,
+                    slaRate,
+                    machines: envMachines,
+                    machineTotal,
+                    machineOnline,
+                    machineOffline,
+                    avgTcp,
+                    apis: envApis,
+                    apiTotal,
+                    apiHealthy,
+                    apiDown,
+                    apiCircuitBroken,
+                    avgHttp
+                };
+            });
+        });
+
         // 机器管理计算指标与过滤列表
         const onlineMachineCount = computed(() => {
             return machineList.value.filter(m => m.current_status === "ONLINE").length;
@@ -389,7 +473,7 @@ const app = createApp({
             }
         };
 
-        const fetchData = async () => {
+        const fetchData = async (isManual = false) => {
             loading.value = true;
             try {
                 const [targetsRes, summaryRes, groupsRes, envsRes, machinesRes, apisRes] = await Promise.all([
@@ -418,23 +502,27 @@ const app = createApp({
                     if (t.current_status === "DOWN" || t.current_status === "DEGRADED") envMap[gName].down++;
                 }
 
-                // 合并环境资产，保证所有环境即使未挂载目标也在侧边栏展现
+                // 仅同步实际在环境管理中的环境资产
                 const mergedGroups = [];
                 for (const env of environmentList.value) {
                     const stats = envMap[env.name] || { name: env.name, total: 0, healthy: 0, down: 0 };
                     mergedGroups.push(stats);
                 }
-                for (const gName of Object.keys(envMap)) {
-                    if (!mergedGroups.some(g => g.name === gName)) {
-                        mergedGroups.push(envMap[gName]);
-                    }
-                }
                 groupList.value = mergedGroups;
+
+                lastRefreshTime.value = new Date().toLocaleTimeString();
+                if (isManual) {
+                    ElementPlus.ElMessage.success(`监控大盘数据已同步至最新 (${lastRefreshTime.value})`);
+                }
             } catch (err) {
                 ElementPlus.ElMessage.error("获取监控数据失败: " + (err.response?.data?.detail || err.message));
             } finally {
                 loading.value = false;
             }
+        };
+
+        const handleManualRefresh = () => {
+            fetchData(true);
         };
 
         const handleTrigger = async (row) => {
@@ -547,6 +635,40 @@ const app = createApp({
             selectedApiEnv.value = envName;
             selectedApiMachine.value = "ALL";
             activeMenuKey.value = "api_management";
+        };
+
+        const goToEnvApis = (envName) => {
+            currentNav.value = "api_management";
+            activeMenuKey.value = "api_management";
+            selectedApiEnv.value = envName || "ALL";
+            selectedApiMachine.value = "ALL";
+            selectedApiStatus.value = "ALL";
+            apiSearchQuery.value = "";
+        };
+
+        const goToEnvMachines = (envName) => {
+            currentNav.value = "machine_management";
+            activeMenuKey.value = "machine_management";
+            selectedMachineEnv.value = envName || "ALL";
+            machineSearchQuery.value = "";
+        };
+
+        const getEnvStatusBadgeClass = (status) => {
+            switch (status) {
+                case "HEALTHY": return "status-badge healthy";
+                case "DOWN": return "status-badge down";
+                case "DEGRADED": return "status-badge degraded";
+                default: return "status-badge unknown";
+            }
+        };
+
+        const getEnvBorderTopColor = (status) => {
+            switch (status) {
+                case "HEALTHY": return "#059669";
+                case "DOWN": return "#dc2626";
+                case "DEGRADED": return "#d97706";
+                default: return "#94a3b8";
+            }
         };
 
         const getEnvTargetCount = (envName) => {
@@ -1343,6 +1465,8 @@ const app = createApp({
             loadingHistory,
             historyList,
             fetchData,
+            lastRefreshTime,
+            handleManualRefresh,
             handleTrigger,
             handleDelete,
             openCreateDialog,
@@ -1368,6 +1492,11 @@ const app = createApp({
             submitEnvForm,
             handleDeleteEnv,
             goToEnvTargets,
+            goToEnvApis,
+            goToEnvMachines,
+            getEnvStatusBadgeClass,
+            getEnvBorderTopColor,
+            dashboardEnvironments,
             getEnvTargetCount,
             // 机器管理导出
             machineList,

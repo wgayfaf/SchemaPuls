@@ -433,3 +433,102 @@
             height: 320px;
             margin-bottom: 16px;
         }
+
+        /* ================= 全局大盘 - 环境运行态势矩阵卡片 ================= */
+        .env-dashboard-card {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.04);
+            transition: all 0.2s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .env-dashboard-card:hover {
+            border-color: #bfdbfe;
+            box-shadow: 0 6px 16px -2px rgba(37, 99, 235, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .env-dashboard-card-header {
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .env-title-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .env-title-text {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .env-desc-text {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+
+        .env-dashboard-card-body {
+            padding: 16px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .env-stat-subgrid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .env-substat-box {
+            background: #f8fbfe;
+            border: 1px solid #e2eafd;
+            border-radius: 6px;
+            padding: 10px 12px;
+        }
+
+        .env-substat-title {
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .env-substat-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
+
+        .env-dashboard-card-footer {
+            padding: 12px 20px;
+            background: #fafcff;
+            border-top: 1px solid #f1f5f9;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
