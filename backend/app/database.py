@@ -6,12 +6,26 @@ DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(DB_DIR, "monitor.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-# 原型阶段使用 SQLite，connect_args 适配多线程
+from sqlalchemy import text, event
+
+# 原型阶段使用 SQLite，connect_args 适配并发与高吞吐
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False}
+    connect_args={"check_same_thread": False, "timeout": 15}
 )
+
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("PRAGMA busy_timeout=15000;")
+    finally:
+        cursor.close()
+
 
 
 def init_db():
@@ -39,6 +53,20 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass  # 若字段已存在则忽略异常
+
+        api_columns_to_add = [
+            ("http_params", "TEXT DEFAULT '[]'"),
+            ("http_body_type", "VARCHAR(32) DEFAULT 'none'"),
+            ("http_body", "TEXT"),
+            ("auth_type", "VARCHAR(32) DEFAULT 'none'"),
+            ("auth_config", "TEXT DEFAULT '{}'"),
+        ]
+        for col_name, col_def in api_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE api_probes ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
                 
     # 自动执行单层平铺向四层拓扑结构平滑数据迁移
     migrate_flat_to_hierarchical()

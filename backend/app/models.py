@@ -64,7 +64,12 @@ class ApiProbe(SQLModel, table=True):
     name: str = Field(max_length=64, index=True)
     http_path: str = Field(default="/health")           # 业务接口路径
     http_method: str = Field(default="GET")
-    http_headers: Dict[str, str] = Field(default={}, sa_column=Column(JSON))
+    http_params: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 查询参数列表
+    http_headers: Any = Field(default=[], sa_column=Column(JSON)) # 请求头列表或字典
+    http_body_type: str = Field(default="none")                                   # none, json, form_data, raw
+    http_body: Optional[str] = Field(default=None)                                # 请求体内容
+    auth_type: str = Field(default="none")                                        # none, bearer, basic
+    auth_config: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))       # 鉴权配置，如 token 或 basic 凭证
     expected_schema: Dict[str, Any] = Field(sa_column=Column(JSON)) # Draft-7 JSON Schema
     cron_interval_minutes: int = Field(default=5)
     is_active: bool = Field(default=True)

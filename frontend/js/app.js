@@ -23,7 +23,7 @@ axios.interceptors.response.use(
     }
 );
 
-const { createApp, ref, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
 
 const app = createApp({
     setup() {
@@ -108,6 +108,28 @@ const app = createApp({
                 }
             }, null, 2)
         });
+
+        // Postman 风格工作台专属响应式状态
+        const apiActiveTab = ref("params"); // 'params' | 'headers' | 'body' | 'auth' | 'schema'
+        const apiResponseTab = ref("body"); // 'body' | 'headers'
+        const apiParamsList = ref([
+            { enabled: true, key: "", value: "", description: "" }
+        ]);
+        const apiHeadersList = ref([
+            { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
+        ]);
+        const apiBodyType = ref("none"); // 'none' | 'json' | 'form'
+        const apiBodyText = ref("");
+        const apiAuthType = ref("none"); // 'none' | 'bearer' | 'basic' | 'custom'
+        const apiAuthConfig = ref({
+            token: "",
+            username: "",
+            password: "",
+            header_key: "Authorization",
+            header_value: ""
+        });
+        const apiTestRunning = ref(false);
+        const apiTestResult = ref(null);
 
         const sampleJsonText = ref("");
         const form = ref({
@@ -246,8 +268,8 @@ const app = createApp({
                     (m.environment_name && m.environment_name === env.name)
                 );
                 const machineTotal = envMachines.length;
-                const machineOnline = envMachines.filter(m => m.current_status === "ONLINE" || m.last_tcp_ok === true).length;
-                const machineOffline = envMachines.filter(m => m.current_status === "OFFLINE" || m.current_status === "DEGRADED" || m.last_tcp_ok === false).length;
+                const machineOnline = envMachines.filter(m => m.current_status === "ONLINE" || m.current_status === "DEGRADED").length;
+                const machineOffline = envMachines.filter(m => m.current_status === "OFFLINE").length;
                 
                 const validTcp = envMachines.filter(m => m.last_tcp_latency_ms && m.last_tcp_latency_ms > 0);
                 const avgTcp = validTcp.length > 0
@@ -319,11 +341,11 @@ const app = createApp({
 
         // 机器管理计算指标与过滤列表
         const onlineMachineCount = computed(() => {
-            return machineList.value.filter(m => m.current_status === "ONLINE").length;
+            return machineList.value.filter(m => m.current_status === "ONLINE" || m.current_status === "DEGRADED").length;
         });
 
         const offlineMachineCount = computed(() => {
-            return machineList.value.filter(m => m.current_status === "OFFLINE" || m.current_status === "DEGRADED").length;
+            return machineList.value.filter(m => m.current_status === "OFFLINE").length;
         });
 
         const avgTcpLatency = computed(() => {
@@ -675,6 +697,17 @@ const app = createApp({
             return targets.value.filter(t => (t.group_name || "生产环境") === envName).length;
         };
 
+        const getEnvMachineCount = (envId, envName) => {
+            return machineList.value.filter(m => 
+                (envId != null && m.environment_id === envId) || 
+                (envName && m.environment_name === envName)
+            ).length;
+        };
+
+        const getMachineApiCount = (machineId) => {
+            return apiList.value.filter(a => a.machine_id === machineId).length;
+        };
+
         // 机器管理 CRUD 与连通性测试
         const openCreateMachineDialog = (defaultEnvId = null) => {
             editingMachineId.value = null;
@@ -811,7 +844,125 @@ const app = createApp({
             activeMenuKey.value = "api_management";
         };
 
-        // 接口管理 CRUD 与拨测
+        // 接口管理 Postman 风格工作台方法与 CRUD
+        const selectedMachineHost = computed(() => {
+            if (!apiForm.value.machine_id) return "http://host:port";
+            const m = machineList.value.find(item => item.id === apiForm.value.machine_id);
+            if (!m) return "http://host:port";
+            return `http://${m.host}:${m.port}`;
+        });
+
+        let isSyncingUrlParams = false;
+
+        const syncParamsToPath = () => {
+            if (isSyncingUrlParams) return;
+            isSyncingUrlParams = true;
+            try {
+                const currentPath = apiForm.value.http_path || "";
+                const basePath = currentPath.split("?")[0] || "/";
+                const activePairs = apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim() !== "");
+                if (activePairs.length === 0) {
+                    apiForm.value.http_path = basePath;
+                } else {
+                    const q = activePairs.map(p => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value || "")}`).join("&");
+                    apiForm.value.http_path = `${basePath}?${q}`;
+                }
+            } finally {
+                isSyncingUrlParams = false;
+            }
+        };
+
+        const syncPathToParams = (newPath) => {
+            if (isSyncingUrlParams) return;
+            isSyncingUrlParams = true;
+            try {
+                if (!newPath || !newPath.includes("?")) {
+                    return;
+                }
+                const queryString = newPath.split("?")[1];
+                if (!queryString) return;
+                const searchParams = new URLSearchParams(queryString);
+                const newParams = [];
+                searchParams.forEach((val, key) => {
+                    newParams.push({ enabled: true, key, value: val, description: "" });
+                });
+                if (newParams.length > 0) {
+                    apiParamsList.value = newParams;
+                }
+            } catch (e) {
+                // 忽略路径输入过程中的格式异常
+            } finally {
+                isSyncingUrlParams = false;
+            }
+        };
+
+        const addParamRow = () => {
+            apiParamsList.value.push({ enabled: true, key: "", value: "", description: "" });
+        };
+
+        const removeParamRow = (idx) => {
+            apiParamsList.value.splice(idx, 1);
+            if (apiParamsList.value.length === 0) {
+                apiParamsList.value.push({ enabled: true, key: "", value: "", description: "" });
+            }
+            syncParamsToPath();
+        };
+
+        const addHeaderRow = () => {
+            apiHeadersList.value.push({ enabled: true, key: "", value: "", description: "" });
+        };
+
+        const removeHeaderRow = (idx) => {
+            apiHeadersList.value.splice(idx, 1);
+            if (apiHeadersList.value.length === 0) {
+                apiHeadersList.value.push({ enabled: true, key: "", value: "", description: "" });
+            }
+        };
+
+        const applyHeaderPreset = (preset) => {
+            if (preset === 'json') {
+                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'content-type');
+                if (existing) {
+                    existing.value = 'application/json';
+                    existing.enabled = true;
+                } else {
+                    apiHeadersList.value.push({ enabled: true, key: 'Content-Type', value: 'application/json', description: 'JSON 数据类型' });
+                }
+            } else if (preset === 'bearer') {
+                apiActiveTab.value = 'auth';
+                apiAuthType.value = 'bearer';
+                if (!apiAuthConfig.value.token) {
+                    apiAuthConfig.value.token = '{{TOKEN}}';
+                }
+            } else if (preset === 'accept_json') {
+                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'accept');
+                if (existing) {
+                    existing.value = 'application/json';
+                    existing.enabled = true;
+                } else {
+                    apiHeadersList.value.push({ enabled: true, key: 'Accept', value: 'application/json', description: '期望接收 JSON' });
+                }
+            } else if (preset === 'form') {
+                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'content-type');
+                if (existing) {
+                    existing.value = 'application/x-www-form-urlencoded';
+                    existing.enabled = true;
+                } else {
+                    apiHeadersList.value.push({ enabled: true, key: 'Content-Type', value: 'application/x-www-form-urlencoded', description: '表单数据' });
+                }
+            }
+            ElementPlus.ElMessage.success("已应用预设");
+        };
+
+        const insertMacroToBody = (macroType) => {
+            let snippet = "";
+            if (macroType === 'timestamp') snippet = '"{{$timestamp}}"';
+            else if (macroType === 'uuid') snippet = '"{{$uuid}}"';
+            else if (macroType === 'randomInt') snippet = '{{$randomInt(1000, 9999)}}';
+            else snippet = macroType;
+            apiBodyText.value = (apiBodyText.value || "") + snippet;
+        };
+
         const openCreateApiDialog = (defaultMachineId = null) => {
             editingApiId.value = null;
             let mId = defaultMachineId;
@@ -840,6 +991,25 @@ const app = createApp({
                 }, null, 2)
             };
             apiSampleJson.value = "";
+            apiActiveTab.value = "params";
+            apiResponseTab.value = "body";
+            apiParamsList.value = [
+                { enabled: true, key: "", value: "", description: "" }
+            ];
+            apiHeadersList.value = [
+                { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
+            ];
+            apiBodyType.value = "none";
+            apiBodyText.value = "";
+            apiAuthType.value = "none";
+            apiAuthConfig.value = {
+                token: "",
+                username: "",
+                password: "",
+                header_key: "Authorization",
+                header_value: ""
+            };
+            apiTestResult.value = null;
             apiDialogVisible.value = true;
         };
 
@@ -857,6 +1027,54 @@ const app = createApp({
                 schema_text: row.expected_schema ? JSON.stringify(row.expected_schema, null, 2) : "{}"
             };
             apiSampleJson.value = "";
+            apiActiveTab.value = "params";
+            apiResponseTab.value = "body";
+
+            // 恢复 Params
+            if (row.http_params && Array.isArray(row.http_params) && row.http_params.length > 0) {
+                apiParamsList.value = row.http_params.map(p => ({
+                    enabled: p.enabled !== false,
+                    key: p.key || "",
+                    value: p.value || "",
+                    description: p.description || ""
+                }));
+            } else if (row.http_path && row.http_path.includes("?")) {
+                const searchParams = new URLSearchParams(row.http_path.split("?")[1]);
+                const plist = [];
+                searchParams.forEach((val, key) => {
+                    plist.push({ enabled: true, key, value: val, description: "" });
+                });
+                apiParamsList.value = plist.length > 0 ? plist : [{ enabled: true, key: "", value: "", description: "" }];
+            } else {
+                apiParamsList.value = [{ enabled: true, key: "", value: "", description: "" }];
+            }
+
+            // 恢复 Headers
+            if (row.http_headers && Array.isArray(row.http_headers) && row.http_headers.length > 0) {
+                apiHeadersList.value = row.http_headers.map(h => ({
+                    enabled: h.enabled !== false,
+                    key: h.key || "",
+                    value: h.value || "",
+                    description: h.description || ""
+                }));
+            } else {
+                apiHeadersList.value = [
+                    { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
+                ];
+            }
+
+            apiBodyType.value = row.http_body_type || "none";
+            apiBodyText.value = row.http_body || "";
+            apiAuthType.value = row.auth_type || "none";
+            apiAuthConfig.value = Object.assign({
+                token: "",
+                username: "",
+                password: "",
+                header_key: "Authorization",
+                header_value: ""
+            }, row.auth_config || {});
+
+            apiTestResult.value = null;
             apiDialogVisible.value = true;
         };
 
@@ -875,6 +1093,83 @@ const app = createApp({
                 const schemaObj = (res.data && res.data.schema) ? res.data.schema : res.data;
                 apiForm.value.schema_text = JSON.stringify(schemaObj, null, 2);
                 ElementPlus.ElMessage.success("成功自动推导生成 Draft-7 契约规则！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("推导失败: " + (err.response?.data?.detail || err.message));
+            } finally {
+                apiInferring.value = false;
+            }
+        };
+
+        const handleTestRunApi = async () => {
+            if (!apiForm.value.machine_id) {
+                ElementPlus.ElMessage.warning("请先选择宿主机器节点！");
+                return;
+            }
+            if (!apiForm.value.http_path || !apiForm.value.http_path.trim()) {
+                ElementPlus.ElMessage.warning("请输入请求相对路径！");
+                return;
+            }
+            let parsedSchema = null;
+            if (apiForm.value.schema_text && apiForm.value.schema_text.trim()) {
+                try {
+                    parsedSchema = JSON.parse(apiForm.value.schema_text);
+                } catch (e) {
+                    // 仅提示不阻断
+                }
+            }
+
+            apiTestRunning.value = true;
+            try {
+                const testPayload = {
+                    machine_id: apiForm.value.machine_id,
+                    http_method: apiForm.value.http_method,
+                    http_path: apiForm.value.http_path.trim(),
+                    http_params: apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim()),
+                    http_headers: apiHeadersList.value.filter(h => h.enabled && h.key && h.key.trim()),
+                    http_body_type: apiBodyType.value,
+                    http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
+                    auth_type: apiAuthType.value,
+                    auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
+                    expected_schema: parsedSchema
+                };
+                const res = await axios.post("/api/apis/test-run", testPayload);
+                apiTestResult.value = res.data;
+                if (res.data.status_code >= 200 && res.data.status_code < 300) {
+                    ElementPlus.ElMessage.success(`调试请求完成 [${res.data.status_code} OK] (${res.data.latency_ms}ms)`);
+                } else {
+                    ElementPlus.ElMessage.warning(`响应状态码: ${res.data.status_code || '异常'} (${res.data.latency_ms || 0}ms)`);
+                }
+            } catch (err) {
+                apiTestResult.value = {
+                    status_code: 0,
+                    latency_ms: 0,
+                    schema_matched: false,
+                    schema_error: err.response?.data?.detail || err.message,
+                    response_data: { error: err.response?.data?.detail || err.message },
+                    response_headers: {},
+                    resolved_url: ""
+                };
+                ElementPlus.ElMessage.error("请求调试异常: " + (err.response?.data?.detail || err.message));
+            } finally {
+                apiTestRunning.value = false;
+            }
+        };
+
+        const inferSchemaFromTestResult = async () => {
+            if (!apiTestResult.value || !apiTestResult.value.response_data) {
+                ElementPlus.ElMessage.warning("当前没有调试响应数据可供推导");
+                return;
+            }
+            apiInferring.value = true;
+            try {
+                const res = await axios.post("/api/tools/infer-schema", {
+                    sample_json: apiTestResult.value.response_data,
+                    strict_mode: false
+                });
+                const schemaObj = (res.data && res.data.schema) ? res.data.schema : res.data;
+                apiForm.value.schema_text = JSON.stringify(schemaObj, null, 2);
+                apiActiveTab.value = "schema";
+                ElementPlus.ElMessage.success("已从当前实际响应数据一键推导生成 Draft-7 Schema 契约！");
             } catch (err) {
                 ElementPlus.ElMessage.error("推导失败: " + (err.response?.data?.detail || err.message));
             } finally {
@@ -915,7 +1210,13 @@ const app = createApp({
                 expected_schema: parsedSchema,
                 cron_interval_minutes: apiForm.value.cron_interval_minutes || 5,
                 is_active: true,
-                email_receivers: receivers
+                email_receivers: receivers,
+                http_params: apiParamsList.value.filter(p => p.key && p.key.trim() !== ""),
+                http_headers: apiHeadersList.value.filter(h => h.key && h.key.trim() !== ""),
+                http_body_type: apiBodyType.value,
+                http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
+                auth_type: apiAuthType.value,
+                auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null
             };
 
             apiSubmitting.value = true;
@@ -935,6 +1236,15 @@ const app = createApp({
                 apiSubmitting.value = false;
             }
         };
+
+        // URL 与 Query Params 双向同步监听
+        watch(apiParamsList, () => {
+            syncParamsToPath();
+        }, { deep: true });
+
+        watch(() => apiForm.value.http_path, (newVal) => {
+            syncPathToParams(newVal);
+        });
 
         const handleDeleteApi = async (apiId, apiName) => {
             try {
@@ -1498,6 +1808,7 @@ const app = createApp({
             getEnvBorderTopColor,
             dashboardEnvironments,
             getEnvTargetCount,
+            getEnvMachineCount,
             // 机器管理导出
             machineList,
             machineDialogVisible,
@@ -1516,6 +1827,7 @@ const app = createApp({
             submitMachineForm,
             handleDeleteMachine,
             handleTriggerMachine,
+            getMachineApiCount,
             goToMachineTargets,
             currentEnvMachines,
             // 接口管理导出
@@ -1542,7 +1854,27 @@ const app = createApp({
             submitApiForm,
             handleDeleteApi,
             handleTriggerApi,
-            openApiMetricsDrawer
+            openApiMetricsDrawer,
+            // Postman 风格工作台导出
+            apiActiveTab,
+            apiResponseTab,
+            apiParamsList,
+            apiHeadersList,
+            apiBodyType,
+            apiBodyText,
+            apiAuthType,
+            apiAuthConfig,
+            apiTestRunning,
+            apiTestResult,
+            selectedMachineHost,
+            addParamRow,
+            removeParamRow,
+            addHeaderRow,
+            removeHeaderRow,
+            applyHeaderPreset,
+            insertMacroToBody,
+            handleTestRunApi,
+            inferSchemaFromTestResult
         };
     }
 });

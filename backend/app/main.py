@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func
 from contextlib import asynccontextmanager
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel
 from genson import SchemaBuilder
 from fastapi.responses import RedirectResponse
@@ -295,7 +295,6 @@ def list_machines(environment_id: Optional[int] = None, group_id: Optional[int] 
         if environment_id and (not env or env.id != environment_id):
             continue
             
-        target_count = session.exec(select(func.count(MonitorTarget.id)).where(MonitorTarget.host == m.host, MonitorTarget.port == m.port)).one() or 0
         api_count = session.exec(select(func.count(ApiProbe.id)).where(ApiProbe.machine_id == m.id)).one() or 0
         
         m_dict = {
@@ -317,7 +316,7 @@ def list_machines(environment_id: Optional[int] = None, group_id: Optional[int] 
             "group_name": grp.name if grp else "核心集群",
             "environment_id": env.id if env else None,
             "environment_name": env.name if env else "默认环境",
-            "api_count": max(target_count, api_count)
+            "api_count": api_count
         }
         result.append(m_dict)
     return result
@@ -468,13 +467,31 @@ class ApiPayload(BaseModel):
     name: str
     http_path: str = "/health"
     http_method: str = "GET"
-    http_headers: Dict[str, str] = {}
+    http_params: List[Dict[str, Any]] = []
+    http_headers: Union[List[Dict[str, Any]], Dict[str, Any], None] = []
+    http_body_type: str = "none"
+    http_body: Optional[str] = None
+    auth_type: str = "none"
+    auth_config: Optional[Dict[str, Any]] = {}
     expected_schema: Dict[str, Any]
     cron_interval_minutes: int = 5
     is_active: bool = True
     email_receivers: List[str] = []
     retry_threshold: int = 3
     silence_minutes: int = 30
+
+
+class ApiTestRunPayload(BaseModel):
+    machine_id: int
+    http_method: str = "GET"
+    http_path: str = "/health"
+    http_params: List[Dict[str, Any]] = []
+    http_headers: Union[List[Dict[str, Any]], Dict[str, Any], None] = []
+    http_body_type: str = "none"
+    http_body: Optional[str] = None
+    auth_type: str = "none"
+    auth_config: Optional[Dict[str, Any]] = {}
+    expected_schema: Optional[Dict[str, Any]] = None
 
 
 # 4. 接口探针层 CRUD 与即时业务校验
@@ -511,7 +528,12 @@ def list_apis(
             "name": a.name,
             "http_path": a.http_path,
             "http_method": a.http_method,
+            "http_params": a.http_params or [],
             "http_headers": a.http_headers or {},
+            "http_body_type": a.http_body_type or "none",
+            "http_body": a.http_body,
+            "auth_type": a.auth_type or "none",
+            "auth_config": a.auth_config or {},
             "expected_schema": a.expected_schema,
             "cron_interval_minutes": a.cron_interval_minutes,
             "is_active": a.is_active,
@@ -537,6 +559,81 @@ def list_apis(
     return result
 
 
+@app.post("/api/apis/test-run")
+async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_session)):
+    """即时在线调试运行探针 (Postman 风格即时发包与响应比对)"""
+    machine = session.get(MachineNode, data.machine_id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="Associated MachineNode not found")
+
+    auth_token = None
+    if data.auth_type == "bearer":
+        auth_token = data.auth_config.get("token")
+
+    from app.services.template_engine import (
+        parse_params_to_dict, parse_headers_to_dict, render_macro_string
+    )
+
+    req_headers = parse_headers_to_dict(data.http_headers, auth_token=auth_token)
+    if data.auth_type == "bearer" and auth_token:
+        if "authorization" not in [k.lower() for k in req_headers]:
+            req_headers["Authorization"] = f"Bearer {auth_token}"
+    elif data.auth_type == "basic":
+        u = data.auth_config.get("username", "")
+        p = data.auth_config.get("password", "")
+        if u or p:
+            import base64
+            b64_val = base64.b64encode(f"{u}:{p}".encode()).decode()
+            if "authorization" not in [k.lower() for k in req_headers]:
+                req_headers["Authorization"] = f"Basic {b64_val}"
+
+    req_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
+    rendered_body = render_macro_string(data.http_body, auth_token=auth_token) if data.http_body else None
+
+    scheme = "https" if machine.port == 443 else "http"
+    rendered_path = render_macro_string(data.http_path, auth_token=auth_token)
+    if not rendered_path.startswith("/"):
+        rendered_path = "/" + rendered_path
+
+    url = (
+        f"{scheme}://{machine.host}:{machine.port}{rendered_path}"
+        if machine.port not in [80, 443]
+        else f"{scheme}://{machine.host}{rendered_path}"
+    )
+
+    from app.services.probe_service import check_http, check_schema
+    http_ok, http_code, http_ms, json_data, http_err = await check_http(
+        url,
+        method=data.http_method,
+        headers=req_headers,
+        params=req_params if req_params else None,
+        body=rendered_body,
+        body_type=data.http_body_type
+    )
+
+    schema_matched = None
+    schema_errors = []
+    if data.expected_schema and isinstance(data.expected_schema, dict):
+        if json_data is not None:
+            schema_matched, schema_errors = check_schema(json_data, data.expected_schema)
+        else:
+            schema_matched = False
+            schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
+
+    return {
+        "status_code": http_code,
+        "latency_ms": http_ms,
+        "is_ok": http_ok,
+        "error_message": http_err,
+        "response_data": json_data,
+        "schema_matched": schema_matched,
+        "schema_errors": schema_errors,
+        "request_url": url,
+        "rendered_headers": req_headers,
+        "rendered_params": req_params
+    }
+
+
 @app.post("/api/apis")
 def create_api(data: ApiPayload, session: Session = Depends(get_session)):
     machine = session.get(MachineNode, data.machine_id)
@@ -548,7 +645,12 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         name=data.name,
         http_path=data.http_path,
         http_method=data.http_method,
+        http_params=data.http_params,
         http_headers=data.http_headers,
+        http_body_type=data.http_body_type,
+        http_body=data.http_body,
+        auth_type=data.auth_type,
+        auth_config=data.auth_config,
         expected_schema=data.expected_schema,
         cron_interval_minutes=data.cron_interval_minutes,
         is_active=data.is_active,
@@ -593,6 +695,12 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         "name": api.name,
         "http_path": api.http_path,
         "http_method": api.http_method,
+        "http_params": api.http_params or [],
+        "http_headers": api.http_headers or {},
+        "http_body_type": api.http_body_type or "none",
+        "http_body": api.http_body,
+        "auth_type": api.auth_type or "none",
+        "auth_config": api.auth_config or {},
         "expected_schema": api.expected_schema,
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,
@@ -621,7 +729,12 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     api.name = data.name
     api.http_path = data.http_path
     api.http_method = data.http_method
+    api.http_params = data.http_params
     api.http_headers = data.http_headers
+    api.http_body_type = data.http_body_type
+    api.http_body = data.http_body
+    api.auth_type = data.auth_type
+    api.auth_config = data.auth_config
     api.expected_schema = data.expected_schema
     api.cron_interval_minutes = data.cron_interval_minutes
     api.is_active = data.is_active
@@ -658,6 +771,12 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
         "name": api.name,
         "http_path": api.http_path,
         "http_method": api.http_method,
+        "http_params": api.http_params or [],
+        "http_headers": api.http_headers or {},
+        "http_body_type": api.http_body_type or "none",
+        "http_body": api.http_body,
+        "auth_type": api.auth_type or "none",
+        "auth_config": api.auth_config or {},
         "expected_schema": api.expected_schema,
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,

@@ -389,8 +389,8 @@
                             </el-table-column>
                             <el-table-column label="名下监控目标" width="160" align="center">
                                 <template #default="{ row }">
-                                    <el-button size="small" type="primary" link @click="goToEnvTargets(row.name)">
-                                        <i class="fa-solid fa-arrow-up-right-from-square" style="margin-right: 4px;"></i>{{ getEnvTargetCount(row.name) }} 个接口
+                                    <el-button size="small" type="primary" link @click="goToEnvMachines(row.name)">
+                                        <i class="fa-solid fa-server" style="margin-right: 4px;"></i>{{ getEnvMachineCount(row.id, row.name) }} 台机器
                                     </el-button>
                                 </template>
                             </el-table-column>
@@ -521,7 +521,7 @@
                             <el-table-column label="名下接口" width="130" align="center">
                                 <template #default="{ row }">
                                     <el-button size="small" type="primary" link @click="goToMachineTargets(row)">
-                                        <i class="fa-solid fa-arrow-up-right-from-square" style="margin-right: 4px;"></i>{{ row.api_count }} 个接口
+                                        <i class="fa-solid fa-arrow-up-right-from-square" style="margin-right: 4px;"></i>{{ getMachineApiCount(row.id) }} 个接口
                                     </el-button>
                                 </template>
                             </el-table-column>
@@ -1235,61 +1235,344 @@ export SMTP_USE_SSL="true"
             </template>
         </el-dialog>
 
-        <!-- 新增/编辑接口对话框 -->
-        <el-dialog v-model="apiDialogVisible" :title="editingApiId ? '编辑接口探测配置' : '新建机器接口探测'" width="640px" destroy-on-close>
-            <el-form :model="apiForm" label-width="110px">
-                <el-form-item label="宿主机器" required>
-                    <el-select v-model="apiForm.machine_id" placeholder="选择归属机器节点" style="width: 100%;">
-                        <el-option v-for="m in machineList" :key="m.id" :label="m.name + ' (' + (m.environment_name || '未指定') + ' | ' + m.host + ':' + m.port + ')'" :value="m.id"></el-option>
-                    </el-select>
-                </el-form-item>
-                <el-form-item label="接口名称" required>
-                    <el-input v-model="apiForm.name" placeholder="例如: 用户鉴权接口 / 订单查询接口"></el-input>
-                </el-form-item>
-                <el-row :gutter="12">
-                    <el-col :span="8">
-                        <el-form-item label="请求方法" required>
-                            <el-select v-model="apiForm.http_method" style="width: 100%;">
-                                <el-option label="GET" value="GET"></el-option>
-                                <el-option label="POST" value="POST"></el-option>
-                                <el-option label="PUT" value="PUT"></el-option>
-                                <el-option label="DELETE" value="DELETE"></el-option>
-                                <el-option label="PATCH" value="PATCH"></el-option>
-                            </el-select>
-                        </el-form-item>
+        <!-- Postman 风格接口探测与调试工作台对话框 -->
+        <el-dialog v-model="apiDialogVisible" :title="editingApiId ? '接口探测配置工作台 (Postman 风格)' : '新建接口探测 (Postman 风格工作台)'" width="980px" top="4vh" class="postman-dialog" destroy-on-close>
+            <!-- 基础元数据设置区 -->
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;">
+                <el-row :gutter="16">
+                    <el-col :span="10">
+                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
+                            <span style="color: #ef4444; margin-right: 2px;">*</span>宿主机器节点 (Host Node)
+                        </div>
+                        <el-select v-model="apiForm.machine_id" placeholder="选择归属机器节点" style="width: 100%;">
+                            <el-option v-for="m in machineList" :key="m.id" :label="m.name + ' (' + (m.environment_name || '未指定') + ' | ' + m.host + ':' + m.port + ')'" :value="m.id"></el-option>
+                        </el-select>
                     </el-col>
-                    <el-col :span="16">
-                        <el-form-item label="相对路径" required label-width="80px">
-                            <el-input v-model="apiForm.http_path" placeholder="例如: /api/v1/health 或 /get"></el-input>
-                        </el-form-item>
+                    <el-col :span="14">
+                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
+                            <span style="color: #ef4444; margin-right: 2px;">*</span>接口业务名称 (API Name)
+                        </div>
+                        <el-input v-model="apiForm.name" placeholder="例如: 用户鉴权服务 / 实时订单聚合接口"></el-input>
                     </el-col>
                 </el-row>
-                <el-form-item label="探测周期(分)">
-                    <el-input-number v-model="apiForm.cron_interval_minutes" :min="1" :max="60" style="width: 140px;"></el-input-number>
-                    <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">宿主离线时自动熔断抑制告警</span>
-                </el-form-item>
-                <el-form-item label="告警通知邮箱">
-                    <el-input v-model="apiForm.email_input" placeholder="多个邮箱用逗号隔开，如: api-ops@company.com"></el-input>
-                </el-form-item>
-                <el-form-item label="JSON 推导辅助">
-                    <div style="width: 100%;">
-                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
-                            <el-input v-model="apiSampleJson" type="textarea" :rows="2" placeholder="在此粘贴接口真实返回的任意 JSON 数据，点击推导即可一键生成下方 Schema 契约规则..."></el-input>
+                <el-row :gutter="16" style="margin-top: 10px;">
+                    <el-col :span="10">
+                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
+                            探测周期(分钟)
+                            <span style="font-size: 11px; font-weight: normal; color: #94a3b8; margin-left: 4px;">宿主离线自动熔断抑制</span>
                         </div>
-                        <el-button size="small" type="primary" plain @click="handleInferApiSchema" :loading="apiInferring">
-                            <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从真实返回推导 Draft-7 Schema
+                        <el-input-number v-model="apiForm.cron_interval_minutes" :min="1" :max="60" style="width: 100%;"></el-input-number>
+                    </el-col>
+                    <el-col :span="14">
+                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
+                            异常告警通知邮箱
+                            <span style="font-size: 11px; font-weight: normal; color: #94a3b8; margin-left: 4px;">多个邮箱用逗号隔开</span>
+                        </div>
+                        <el-input v-model="apiForm.email_input" placeholder="例如: api-ops@company.com, monitor@company.com"></el-input>
+                    </el-col>
+                </el-row>
+            </div>
+
+            <!-- Postman 顶部 URL 请求栏 -->
+            <div class="pm-url-bar">
+                <el-select v-model="apiForm.http_method" class="pm-method-select" :class="'pm-method-' + apiForm.http_method.toLowerCase()">
+                    <el-option label="GET" value="GET" class="pm-method-get"></el-option>
+                    <el-option label="POST" value="POST" class="pm-method-post"></el-option>
+                    <el-option label="PUT" value="PUT" class="pm-method-put"></el-option>
+                    <el-option label="DELETE" value="DELETE" class="pm-method-delete"></el-option>
+                    <el-option label="PATCH" value="PATCH" class="pm-method-patch"></el-option>
+                </el-select>
+                <div class="pm-host-prefix" :title="'宿主基础地址: ' + selectedMachineHost">
+                    <i class="fa-solid fa-server" style="color: #64748b;"></i>
+                    <span>{{ selectedMachineHost }}</span>
+                </div>
+                <el-input v-model="apiForm.http_path" class="pm-path-input" placeholder="/api/v1/resource?query=val"></el-input>
+                <el-button type="primary" class="pm-send-btn" @click="handleTestRunApi" :loading="apiTestRunning">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>发送调试</span>
+                </el-button>
+            </div>
+
+            <!-- Postman 核心配置工作区 (Tabs) -->
+            <el-tabs v-model="apiActiveTab" class="pm-tabs">
+                <!-- 1. Params 标签页 -->
+                <el-tab-pane label="Params (Query 参数)" name="params">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px; color: #64748b;">
+                            <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px; color: #3b82f6;"></i>参数与上方 URL Query 参数已双向实时同步 (勾选启用/禁用)
+                        </span>
+                        <el-button size="small" type="primary" plain @click="addParamRow">
+                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加参数
                         </el-button>
                     </div>
-                </el-form-item>
-                <el-form-item label="预期 Schema" required>
-                    <el-input v-model="apiForm.schema_text" type="textarea" :rows="5" font-family="monospace" placeholder="标准的 JSON Schema 规范 (Draft-7)"></el-input>
-                </el-form-item>
-            </el-form>
+                    <table class="pm-kv-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 45px; text-align: center;">启用</th>
+                                <th style="width: 28%;">参数名 (Key)</th>
+                                <th style="width: 36%;">参数值 (Value 支持宏)</th>
+                                <th>参数说明 (Description)</th>
+                                <th style="width: 50px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(item, idx) in apiParamsList" :key="idx">
+                                <td style="text-align: center;">
+                                    <el-checkbox v-model="item.enabled"></el-checkbox>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.key" placeholder="参数名 如 page" size="small"></el-input>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.value" placeholder="参数值 如 1 或 {{$timestamp}}" size="small"></el-input>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.description" placeholder="用途说明" size="small"></el-input>
+                                </td>
+                                <td style="text-align: center;">
+                                    <span class="pm-kv-action-btn" title="删除此行" @click="removeParamRow(idx)">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </el-tab-pane>
+
+                <!-- 2. Headers 标签页 -->
+                <el-tab-pane label="Headers (请求头)" name="headers">
+                    <div class="pm-preset-bar">
+                        <span style="font-size: 12px; color: #64748b; font-weight: 600;">快速预设:</span>
+                        <span class="pm-preset-tag" @click="applyHeaderPreset('json')">+ JSON Content-Type</span>
+                        <span class="pm-preset-tag" @click="applyHeaderPreset('accept_json')">+ Accept: application/json</span>
+                        <span class="pm-preset-tag" @click="applyHeaderPreset('bearer')">+ Bearer Token</span>
+                        <span class="pm-preset-tag" @click="applyHeaderPreset('form')">+ Form Urlencoded</span>
+                        <div style="flex: 1;"></div>
+                        <el-button size="small" type="primary" plain @click="addHeaderRow">
+                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加请求头
+                        </el-button>
+                    </div>
+                    <table class="pm-kv-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 45px; text-align: center;">启用</th>
+                                <th style="width: 30%;">请求头键 (Header Key)</th>
+                                <th style="width: 38%;">请求头值 (Header Value)</th>
+                                <th>说明 (Description)</th>
+                                <th style="width: 50px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(item, idx) in apiHeadersList" :key="idx">
+                                <td style="text-align: center;">
+                                    <el-checkbox v-model="item.enabled"></el-checkbox>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.key" placeholder="如 Content-Type / X-App-Id" size="small"></el-input>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.value" placeholder="如 application/json" size="small"></el-input>
+                                </td>
+                                <td>
+                                    <el-input v-model="item.description" placeholder="说明" size="small"></el-input>
+                                </td>
+                                <td style="text-align: center;">
+                                    <span class="pm-kv-action-btn" title="删除此行" @click="removeHeaderRow(idx)">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </el-tab-pane>
+
+                <!-- 3. Body 标签页 -->
+                <el-tab-pane label="Body (请求体)" name="body">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <el-radio-group v-model="apiBodyType" size="small">
+                            <el-radio-button label="none">none (无 Body)</el-radio-button>
+                            <el-radio-button label="json">raw (JSON)</el-radio-button>
+                            <el-radio-button label="form">x-www-form-urlencoded</el-radio-button>
+                        </el-radio-group>
+                        <div v-if="apiBodyType === 'json'" style="display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: #64748b;">
+                            <span>插入动态宏:</span>
+                            <span class="pm-macro-badge" @click="insertMacroToBody('timestamp')" v-text="'{{$timestamp}}'"></span>
+                            <span class="pm-macro-badge" @click="insertMacroToBody('uuid')" v-text="'{{$uuid}}'"></span>
+                            <span class="pm-macro-badge" @click="insertMacroToBody('randomInt')" v-text="'{{$randomInt}}'"></span>
+                        </div>
+                    </div>
+
+                    <div v-if="apiBodyType === 'none'" style="padding: 24px; text-align: center; color: #94a3b8; font-size: 13px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px;">
+                        <i class="fa-solid fa-ban" style="margin-right: 6px;"></i>该请求不携带任何 Body 请求体 (适用 GET/DELETE 等)
+                    </div>
+
+                    <div v-else-if="apiBodyType === 'json'" class="pm-code-box">
+                        <el-input v-model="apiBodyText" type="textarea" :rows="7" placeholder="{\n  &quot;userId&quot;: 1001,\n  &quot;action&quot;: &quot;ping&quot;,\n  &quot;traceId&quot;: &quot;{{$uuid}}&quot;,\n  &quot;timestamp&quot;: &quot;{{$timestamp}}&quot;\n}"></el-input>
+                    </div>
+
+                    <div v-else-if="apiBodyType === 'form'" class="pm-code-box">
+                        <el-input v-model="apiBodyText" type="textarea" :rows="6" placeholder="key1=value1&amp;key2={{$timestamp}}"></el-input>
+                    </div>
+                </el-tab-pane>
+
+                <!-- 4. 鉴权与预设宏 标签页 -->
+                <el-tab-pane label="Auth (鉴权预设)" name="auth">
+                    <div style="margin-bottom: 14px;">
+                        <span style="font-size: 12px; font-weight: 600; color: #475569; margin-right: 12px;">鉴权认证类型:</span>
+                        <el-radio-group v-model="apiAuthType" size="small">
+                            <el-radio-button label="none">无鉴权 (No Auth)</el-radio-button>
+                            <el-radio-button label="bearer">Bearer Token</el-radio-button>
+                            <el-radio-button label="basic">Basic Auth</el-radio-button>
+                            <el-radio-button label="custom_header">自定义请求头 (Custom Header)</el-radio-button>
+                        </el-radio-group>
+                    </div>
+
+                    <!-- Bearer Token 配置 -->
+                    <div v-if="apiAuthType === 'bearer'" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; margin-bottom: 12px;">
+                        <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">
+                            Bearer Token 令牌值
+                            <span style="font-size: 11px; font-weight: normal; color: #64748b; margin-left: 6px;">支持静态 Token 或模板宏 (如 <code v-pre>{{TOKEN}}</code>)</span>
+                        </div>
+                        <el-input v-model="apiAuthConfig.token" placeholder="ey..." size="small"></el-input>
+                    </div>
+
+                    <!-- Basic Auth 配置 -->
+                    <div v-if="apiAuthType === 'basic'" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; margin-bottom: 12px;">
+                        <el-row :gutter="12">
+                            <el-col :span="12">
+                                <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">用户名 (Username)</div>
+                                <el-input v-model="apiAuthConfig.username" placeholder="admin" size="small"></el-input>
+                            </el-col>
+                            <el-col :span="12">
+                                <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">密码 (Password)</div>
+                                <el-input v-model="apiAuthConfig.password" type="password" show-password placeholder="••••••" size="small"></el-input>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- Custom Header 配置 -->
+                    <div v-if="apiAuthType === 'custom_header'" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; margin-bottom: 12px;">
+                        <el-row :gutter="12">
+                            <el-col :span="8">
+                                <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">自定义 Header 键名</div>
+                                <el-input v-model="apiAuthConfig.header_key" placeholder="如 X-API-Token / X-Sign" size="small"></el-input>
+                            </el-col>
+                            <el-col :span="16">
+                                <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">自定义 Header 键值</div>
+                                <el-input v-model="apiAuthConfig.header_value" placeholder="Header 对应值" size="small"></el-input>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- 预请求宏引擎支持说明 -->
+                    <div v-pre class="pm-macro-card">
+                        <i class="fa-solid fa-lightbulb" style="font-size: 14px; margin-top: 2px;"></i>
+                        <div>
+                            <div style="font-weight: 700; margin-bottom: 3px;">动态预请求宏引擎已就绪</div>
+                            <div>在 Params、Headers、Body、Auth 中均可直接使用以下动态占位符，拨测时将自动计算替换：</div>
+                            <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px;">
+                                <span><code class="pm-macro-badge">{{$timestamp}}</code> 10位当前秒级时间戳</span>
+                                <span><code class="pm-macro-badge">{{$timestamp_ms}}</code> 13位毫秒级时间戳</span>
+                                <span><code class="pm-macro-badge">{{$uuid}}</code> 唯一 UUIDv4</span>
+                                <span><code class="pm-macro-badge">{{$randomInt(min,max)}}</code> 随机整数范围</span>
+                            </div>
+                        </div>
+                    </div>
+                </el-tab-pane>
+
+                <!-- 5. 预期 Schema 契约 标签页 -->
+                <el-tab-pane label="Schema 契约" name="schema">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 12px; color: #64748b;">
+                            标准的 JSON Schema 规范 (Draft-7)，拨测时将自动验证真实响应是否破坏此契约
+                        </span>
+                        <div style="display: flex; gap: 8px;">
+                            <el-button size="small" type="primary" plain @click="inferSchemaFromTestResult" :disabled="!apiTestResult || !apiTestResult.response_data">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从当前响应推导
+                            </el-button>
+                        </div>
+                    </div>
+                    <div class="pm-code-box">
+                        <el-input v-model="apiForm.schema_text" type="textarea" :rows="8" placeholder="标准的 JSON Schema 规范 (Draft-7)"></el-input>
+                    </div>
+
+                    <!-- 备选手动推导折叠卡片 -->
+                    <div style="margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
+                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <span><i class="fa-solid fa-code" style="margin-right: 4px; color: #64748b;"></i>从自定义 JSON 样本辅助推导</span>
+                            <el-button size="small" text type="primary" @click="handleInferApiSchema" :loading="apiInferring">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>执行推导
+                            </el-button>
+                        </div>
+                        <el-input v-model="apiSampleJson" type="textarea" :rows="2" placeholder="在此粘贴外部已有的响应 JSON 文本，点击执行推导即可覆盖上方 Schema 规则"></el-input>
+                    </div>
+                </el-tab-pane>
+            </el-tabs>
+
+            <!-- 实时调试响应预览面板 (Live Response Inspector) -->
+            <div class="pm-response-card">
+                <div class="pm-response-header">
+                    <div class="pm-response-meta">
+                        <span style="font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-terminal" style="color: #2563eb;"></i>
+                            调试响应面板 (Response Preview)
+                        </span>
+
+                        <template v-if="apiTestResult">
+                            <span class="pm-badge-status" :class="apiTestResult.status_code >= 200 && apiTestResult.status_code < 300 ? 'pm-badge-2xx' : (apiTestResult.status_code >= 400 && apiTestResult.status_code < 500 ? 'pm-badge-4xx' : 'pm-badge-5xx')">
+                                {{ apiTestResult.status_code ? apiTestResult.status_code + ' OK' : 'ERR' }}
+                            </span>
+                            <span class="pm-badge-latency">
+                                <i class="fa-regular fa-clock" style="margin-right: 3px;"></i>{{ apiTestResult.latency_ms || 0 }} ms
+                            </span>
+                            <span v-if="apiTestResult.schema_matched" class="pm-badge-schema-ok">
+                                <i class="fa-solid fa-circle-check"></i> 契约校验通过
+                            </span>
+                            <span v-else-if="apiTestResult.schema_error" class="pm-badge-schema-err" :title="apiTestResult.schema_error">
+                                <i class="fa-solid fa-circle-exclamation"></i> 契约不匹配
+                            </span>
+                        </template>
+                    </div>
+
+                    <div v-if="apiTestResult" style="display: flex; gap: 8px; align-items: center;">
+                        <el-radio-group v-model="apiResponseTab" size="small">
+                            <el-radio-button label="body">Body (JSON)</el-radio-button>
+                            <el-radio-button label="headers">Headers</el-radio-button>
+                        </el-radio-group>
+                        <el-button size="small" type="success" plain @click="inferSchemaFromTestResult" :disabled="!apiTestResult.response_data">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>一键推导 Schema
+                        </el-button>
+                    </div>
+                </div>
+
+                <!-- 响应内容渲染 -->
+                <div v-if="!apiTestResult" class="pm-response-empty">
+                    <i class="fa-solid fa-paper-plane" style="font-size: 24px; color: #cbd5e1; margin-bottom: 8px; display: block;"></i>
+                    点击上方【发送调试】按钮，发起实时探测并在此查看状态码、延迟、真实响应与契约匹配详情
+                </div>
+                <div v-else>
+                    <div v-if="apiResponseTab === 'body'">
+                        <pre class="pm-response-body">{{ JSON.stringify(apiTestResult.response_data, null, 2) }}</pre>
+                    </div>
+                    <div v-else-if="apiResponseTab === 'headers'">
+                        <pre class="pm-response-body">{{ JSON.stringify(apiTestResult.response_headers || {}, null, 2) }}</pre>
+                    </div>
+                </div>
+            </div>
+
             <template #footer>
-                <el-button @click="apiDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="submitApiForm" :loading="apiSubmitting">
-                    {{ editingApiId ? '保存修改' : '确认创建并接入调度' }}
-                </el-button>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="font-size: 12px; color: #64748b;">
+                        <i class="fa-solid fa-shield-halved" style="color: #10b981; margin-right: 4px;"></i>
+                        接口已绑定宿主节点，当机器离线时调度器将自动熔断并静默抑制误报
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <el-button @click="apiDialogVisible = false">取消</el-button>
+                        <el-button type="primary" @click="submitApiForm" :loading="apiSubmitting">
+                            {{ editingApiId ? '保存修改并更新调度' : '确认创建并接入调度' }}
+                        </el-button>
+                    </div>
+                </div>
             </template>
         </el-dialog>
 
