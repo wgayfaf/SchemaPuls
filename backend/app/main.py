@@ -5,8 +5,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from genson import SchemaBuilder
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 import os
 
 from app.database import init_db, get_session
@@ -30,8 +29,6 @@ from app.services.scheduler import (
 )
 from app.services.metric_service import get_dashboard_summary, get_target_metrics
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,12 +41,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SchemaPulse API",
-    description="服务监控资产层级化与解耦探测系统",
+    description="服务监控资产层级化与解耦探测系统 (前后端分离架构)",
     version="2.0.0",
     lifespan=lifespan
 )
 
-# 允许跨域
+# 允许全域跨域 (CORS)，全面支持独立前端工程 (http://127.0.0.1:3000、http://localhost:3000 等)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,23 +55,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 挂载前端静态资源
-if os.path.exists(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
 
 @app.get("/")
 def read_root():
-    return RedirectResponse(url="/web")
+    """纯后端 API 根路径：返回服务运行元数据及前端服务指引"""
+    return {
+        "name": "SchemaPulse API Server",
+        "version": "2.0.0",
+        "status": "online",
+        "architecture": "Decoupled (Frontend & Backend Separated)",
+        "frontend_dev_url": "http://127.0.0.1:3000",
+        "api_docs_url": "/docs",
+        "redoc_url": "/redoc"
+    }
 
 
 @app.get("/web")
 @app.get("/dashboard")
 def get_web_console():
-    index_file = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_file):
-        return FileResponse(index_file)
-    return {"message": "Frontend static file not found"}
+    """向后兼容路由：重定向至独立前端服务"""
+    return RedirectResponse(url="http://127.0.0.1:3000")
 
 
 # ==========================================================

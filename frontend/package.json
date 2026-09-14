@@ -1,0 +1,20 @@
+{
+  "name": "schemapulse-frontend",
+  "version": "2.0.0",
+  "description": "SchemaPulse - 工业级服务健康与契约监控工作台独立前端工程",
+  "main": "index.html",
+  "scripts": {
+    "serve": "python run.py",
+    "dev": "python run.py",
+    "start": "python run.py"
+  },
+  "keywords": [
+    "vue3",
+    "element-plus",
+    "echarts",
+    "json-schema",
+    "health-check"
+  ],
+  "author": "SchemaPulse Team",
+  "license": "MIT"
+}

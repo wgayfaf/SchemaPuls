@@ -1,3 +1,28 @@
+/**
+ * SchemaPulse 前端核心业务逻辑
+ * 前后端分离架构下驱动 Vue 3 + Element-Plus + ECharts
+ */
+
+// 配置 Axios 默认基础 API 路由 (支持前后端分离与远程 API)
+if (window.API_BASE_URL) {
+    axios.defaults.baseURL = window.API_BASE_URL;
+} else if (window.SCHEMA_PULSE_CONFIG && window.SCHEMA_PULSE_CONFIG.API_BASE_URL) {
+    axios.defaults.baseURL = window.SCHEMA_PULSE_CONFIG.API_BASE_URL;
+} else {
+    axios.defaults.baseURL = "http://127.0.0.1:8000";
+}
+
+// 全局请求拦截与错误兜底
+axios.interceptors.response.use(
+    response => response,
+    error => {
+        if (error.code === "ERR_NETWORK" || !error.response) {
+            console.error("[SchemaPulse API Network Error]", error);
+        }
+        return Promise.reject(error);
+    }
+);
+
 const { createApp, ref, computed, onMounted, nextTick } = Vue;
 
 const app = createApp({
