@@ -129,7 +129,7 @@ const app = createApp({
         ];
 
         const systemDefaultHeaders = ref(createDefaultHeaders());
-        const showDefaultHeaders = ref(true); // 默认展示 Postman 预填请求头
+        const showDefaultHeaders = ref(false); // 默认收起 Postman 预填请求头，用户主动点击后才展开
 
         const apiHeadersList = ref([
             { enabled: true, key: "", value: "", description: "" }
@@ -1486,7 +1486,7 @@ const app = createApp({
                 { enabled: true, key: "", value: "", description: "" }
             ];
             systemDefaultHeaders.value = createDefaultHeaders();
-            showDefaultHeaders.value = true;
+            showDefaultHeaders.value = false;
             apiHeadersList.value = [
                 { enabled: true, key: "", value: "", description: "" }
             ];
@@ -1523,95 +1523,24 @@ const app = createApp({
         };
 
         const applyPreActionPreset = (preset) => {
-            if (preset === 'timestamp') {
-                apiPreActionsList.value.push({
-                    enabled: true,
-                    type: "set_variable",
-                    key: "timestamp",
-                    value: "{{$timestamp}}",
-                    description: "当前10位秒级时间戳"
-                });
-            } else if (preset === 'uuid') {
-                apiPreActionsList.value.push({
-                    enabled: true,
-                    type: "inject_header",
-                    key: "X-Trace-Id",
-                    value: "{{$uuid}}",
-                    description: "请求链路追踪UUID"
-                });
-            } else if (preset === 'random_param') {
-                apiPreActionsList.value.push({
-                    enabled: true,
-                    type: "inject_param",
-                    key: "rand",
-                    value: "{{$randomInt(1000, 9999)}}",
-                    description: "防缓存随机参数"
-                });
-            } else if (preset === 'js_script') {
+            if (preset === 'js_script') {
                 apiPreActionsList.value.push({
                     enabled: true,
                     type: "javascript",
                     key: "",
-                    value: "// Postman 风格 JavaScript 预请求脚本\npm.variables.set('token', 'TOKEN_' + Date.now());\npm.request.headers.add({ key: 'X-Sign', value: 'SIGN_' + Math.random().toString(36).substring(7) });\npm.variables.set('auth_b64', btoa('user:pass'));",
-                    description: "Postman JS 动态脚本"
-                });
-            } else if (preset === 'js_rsa') {
-                apiPreActionsList.value.push({
-                    enabled: true,
-                    type: "javascript",
-                    key: "",
-                    value: `// 引入内置 jsrsasign 密码学库
-const jsrsasign = require('jsrsasign');
-
-// 1. 设置 RSA 公钥 PEM (支持带或不带换行符)
-let publicKeyPEM = '-----BEGIN PUBLIC KEY-----' + 'YOUR_BASE64_PUBLIC_KEY' + '-----END PUBLIC KEY-----';
-const plainPassword = 'my_password_123';
-
-// 2. 获取公钥对象并执行 RSA 加密
-const pubKeyObj = jsrsasign.KEYUTIL.getKey(publicKeyPEM);
-const encryptedHex = jsrsasign.KJUR.crypto.Cipher.encrypt(plainPassword, pubKeyObj);
-
-// 3. 十六进制转 Base64 (支持内置 Buffer 或 btoa)
-function hexToBase64(hex) {
-    if (typeof Buffer !== 'undefined') return Buffer.from(hex, 'hex').toString('base64');
-    var bin = '';
-    for (var i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
-    return btoa(bin);
-}
-const encryptedBase64 = hexToBase64(encryptedHex);
-
-// 4. 保存为环境变量，可在 Body 中通过 {{ENCRYPTED_PASSWORD}} 引用
-pm.environment.set('ENCRYPTED_PASSWORD', encryptedBase64);
-console.log('RSA 加密完成，密文长度:', encryptedBase64.length);`,
-                    description: "jsrsasign RSA 公钥加密密码"
-                });
-            } else if (preset === 'js_crypto') {
-                apiPreActionsList.value.push({
-                    enabled: true,
-                    type: "javascript",
-                    key: "",
-                    value: `// 引入内置 crypto-js 库
-const CryptoJS = require('crypto-js');
-
-// 计算 MD5 与 SHA256 哈希
-const md5Hash = CryptoJS.MD5('plainText_' + Date.now()).toString();
-const sha256Hash = CryptoJS.SHA256('SchemaPulseSecretKey').toString();
-
-pm.variables.set('md5_sign', md5Hash);
-pm.variables.set('sha256_sign', sha256Hash);
-console.log('CryptoJS 签名计算完成:', md5Hash);`,
-                    description: "CryptoJS MD5/SHA256 哈希"
+                    value: "",
+                    description: "Postman JS 脚本"
                 });
             } else if (preset === 'script') {
                 apiPreActionsList.value.push({
                     enabled: true,
                     type: "custom_script",
                     key: "",
-                    value: "variables['sign'] = 'sign_' + str(int(time.time()))",
-                    description: "Python 动态签名脚本"
+                    value: "",
+                    description: "Python 脚本"
                 });
             }
-            ElementPlus.ElMessage.success("已添加前置操作预设！");
+            ElementPlus.ElMessage.success("已添加前置操作！");
         };
 
         const addPostActionRow = () => {
@@ -1664,7 +1593,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             } else if (item.type === 'javascript') {
                 item.name = item.name || "Postman JS 脚本断言";
                 item.expression = "";
-                item.value = item.value || "pm.test('Status is 200', function() {\n    pm.response.to.have.status(200);\n});\nvar json = pm.response.json();\npm.test('Code is 200', function() {\n    pm.expect(json.code).to.equal(200);\n});";
+                item.value = item.value || "";
                 item.operator = "pm.test";
                 item.target_value = "";
             }
@@ -1730,7 +1659,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                     enabled: true,
                     name: "Postman JS 脚本测试断言",
                     type: "javascript",
-                    value: "pm.test('状态码等于 200', function() {\n    pm.response.to.have.status(200);\n});\nvar json = pm.response.json();\npm.test('响应业务码为 200', function() {\n    pm.expect(json.code).to.equal(200);\n});\npm.environment.set('user_id', json.data ? json.data.id : null);",
+                    value: "",
                     operator: "pm.test",
                     target_value: "",
                     description: "Postman Tests JS 断言脚本"
@@ -1796,7 +1725,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
 
             // 恢复 Headers (分离系统默认请求头与用户自定义请求头)
             systemDefaultHeaders.value = createDefaultHeaders();
-            showDefaultHeaders.value = true;
+            showDefaultHeaders.value = false;
             const customHeaders = [];
             if (row.http_headers && Array.isArray(row.http_headers) && row.http_headers.length > 0) {
                 row.http_headers.forEach(h => {
@@ -2729,6 +2658,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             addPostActionRow,
             removePostActionRow,
             applyPostActionPreset,
+            onPostActionTypeChange,
             // 宿主机器运行环境与环境变量管理导出
             currentMachineEnvironment,
             envVarsDialogVisible,

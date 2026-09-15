@@ -1691,15 +1691,6 @@ export SMTP_USE_SSL="true"
                             <el-radio-button label="json">raw (JSON)</el-radio-button>
                             <el-radio-button label="form">x-www-form-urlencoded</el-radio-button>
                         </el-radio-group>
-                        <div v-if="apiBodyType === 'json'"
-                            style="display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: #64748b;">
-                            <span>插入动态宏:</span>
-                            <span class="pm-macro-badge" @click="insertMacroToBody('timestamp')"
-                                v-text="'{{$timestamp}}'"></span>
-                            <span class="pm-macro-badge" @click="insertMacroToBody('uuid')" v-text="'{{$uuid}}'"></span>
-                            <span class="pm-macro-badge" @click="insertMacroToBody('randomInt')"
-                                v-text="'{{$randomInt}}'"></span>
-                        </div>
                         <div style="flex: 1;"></div>
                         <div v-if="apiBodyType === 'json'" style="display: flex; gap: 6px;">
                             <el-button size="small" type="primary" plain @click="formatBodyJson">
@@ -1791,32 +1782,13 @@ export SMTP_USE_SSL="true"
                         </el-row>
                     </div>
 
-                    <!-- 预请求宏引擎支持说明 -->
-                    <div v-pre class="pm-macro-card">
-                        <i class="fa-solid fa-lightbulb" style="font-size: 14px; margin-top: 2px;"></i>
-                        <div>
-                            <div style="font-weight: 700; margin-bottom: 3px;">动态预请求宏引擎已就绪</div>
-                            <div>在 Params、Headers、Body、Auth 中均可直接使用以下动态占位符，拨测时将自动计算替换：</div>
-                            <div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px;">
-                                <span><code class="pm-macro-badge">{{$timestamp}}</code> 10位当前秒级时间戳</span>
-                                <span><code class="pm-macro-badge">{{$timestamp_ms}}</code> 13位毫秒级时间戳</span>
-                                <span><code class="pm-macro-badge">{{$uuid}}</code> 唯一 UUIDv4</span>
-                                <span><code class="pm-macro-badge">{{$randomInt(min,max)}}</code> 随机整数范围</span>
-                            </div>
-                        </div>
-                    </div>
                 </el-tab-pane>
 
                 <!-- 5. 前置操作 (Pre-request) 标签页 -->
                 <el-tab-pane label="前置操作" name="pre_actions">
                     <div class="pm-preset-bar">
                         <span style="font-size: 12px; color: #64748b; font-weight: 600;">快速预设:</span>
-                        <span class="pm-preset-tag" @click="applyPreActionPreset('timestamp')">+ 设置当前时间戳变量</span>
-                        <span class="pm-preset-tag" @click="applyPreActionPreset('uuid')">+ 注入动态 UUID 跟踪头</span>
-                        <span class="pm-preset-tag" @click="applyPreActionPreset('random_param')">+ 注入随机数参数</span>
                         <span class="pm-preset-tag" @click="applyPreActionPreset('js_script')"><i class="fa-brands fa-js" style="color: #f59e0b; margin-right: 3px;"></i>+ Postman JS 脚本</span>
-                        <span class="pm-preset-tag" @click="applyPreActionPreset('js_rsa')"><i class="fa-solid fa-key" style="color: #10b981; margin-right: 3px;"></i>+ jsrsasign RSA 加密</span>
-                        <span class="pm-preset-tag" @click="applyPreActionPreset('js_crypto')"><i class="fa-solid fa-shield-halved" style="color: #6366f1; margin-right: 3px;"></i>+ crypto-js 哈希/签名</span>
                         <span class="pm-preset-tag" @click="applyPreActionPreset('script')"><i class="fa-brands fa-python" style="color: #3b82f6; margin-right: 3px;"></i>+ Python 脚本</span>
                         <div style="flex: 1;"></div>
                         <el-button size="small" type="primary" plain @click="addPreActionRow">
