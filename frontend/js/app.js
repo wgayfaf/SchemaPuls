@@ -96,19 +96,11 @@ const app = createApp({
             machine_id: null,
             name: "",
             base_url: "",
-            http_path: "/get",
+            http_path: "",
             http_method: "GET",
             cron_interval_minutes: 5,
             email_input: "admin@company.com",
-            schema_text: JSON.stringify({
-                type: "object",
-                required: ["headers", "origin", "url"],
-                properties: {
-                    origin: { type: "string" },
-                    url: { type: "string" },
-                    headers: { type: "object" }
-                }
-            }, null, 2)
+            schema_text: ""
         });
 
         // Postman 风格工作台专属响应式状态
@@ -166,7 +158,7 @@ const app = createApp({
             group_name: "生产环境",
             host: "",
             port: 80,
-            http_path: "/get",
+            http_path: "",
             http_method: "GET",
             cron_interval_minutes: 5,
             email_input: "admin@company.com",
@@ -1135,13 +1127,13 @@ const app = createApp({
             isSyncingUrlParams = true;
             try {
                 const currentPath = apiForm.value.http_path || "";
-                const basePath = currentPath.split("?")[0] || "/";
+                const basePath = currentPath.includes("?") ? currentPath.split("?")[0] : currentPath;
                 const activePairs = apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim() !== "");
                 if (activePairs.length === 0) {
                     apiForm.value.http_path = basePath;
                 } else {
                     const q = activePairs.map(p => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value || "")}`).join("&");
-                    apiForm.value.http_path = `${basePath}?${q}`;
+                    apiForm.value.http_path = basePath ? `${basePath}?${q}` : `?${q}`;
                 }
             } finally {
                 isSyncingUrlParams = false;
@@ -1465,19 +1457,11 @@ const app = createApp({
                 machine_id: mId,
                 name: "",
                 base_url: initialBaseUrl,
-                http_path: "/get",
+                http_path: "",
                 http_method: "GET",
                 cron_interval_minutes: 5,
                 email_input: "admin@company.com",
-                schema_text: JSON.stringify({
-                    type: "object",
-                    required: ["headers", "origin", "url"],
-                    properties: {
-                        origin: { type: "string" },
-                        url: { type: "string" },
-                        headers: { type: "object" }
-                    }
-                }, null, 2)
+                schema_text: ""
             };
             apiSampleJson.value = "";
             apiActiveTab.value = "params";
@@ -1692,7 +1676,7 @@ const app = createApp({
                 machine_id: row.machine_id,
                 name: row.name || "",
                 base_url: initialBaseUrl,
-                http_path: row.http_path || "/get",
+                http_path: row.http_path || "",
                 http_method: row.http_method || "GET",
                 cron_interval_minutes: row.cron_interval_minutes || 5,
                 email_input: (row.email_receivers && Array.isArray(row.email_receivers))
@@ -1932,12 +1916,14 @@ const app = createApp({
                 ElementPlus.ElMessage.warning("请输入接口相对路径！");
                 return;
             }
-            let parsedSchema;
-            try {
-                parsedSchema = JSON.parse(apiForm.value.schema_text);
-            } catch (e) {
-                ElementPlus.ElMessage.error("Schema 规则必须是合法的 JSON 格式！");
-                return;
+            let parsedSchema = {};
+            if (apiForm.value.schema_text && apiForm.value.schema_text.trim()) {
+                try {
+                    parsedSchema = JSON.parse(apiForm.value.schema_text);
+                } catch (e) {
+                    ElementPlus.ElMessage.error("Schema 规则必须是合法的 JSON 格式！");
+                    return;
+                }
             }
 
             const receivers = apiForm.value.email_input
@@ -2088,7 +2074,7 @@ const app = createApp({
                 group_name: selectedGroup.value !== "ALL" ? selectedGroup.value : "生产环境",
                 host: "",
                 port: 80,
-                http_path: "/get",
+                http_path: "",
                 http_method: "GET",
                 cron_interval_minutes: 5,
                 email_input: "admin@company.com",
@@ -2113,7 +2099,7 @@ const app = createApp({
                 group_name: row.group_name || "生产环境",
                 host: row.host || "",
                 port: row.port || 80,
-                http_path: row.http_path || "/get",
+                http_path: row.http_path || "",
                 http_method: row.http_method || "GET",
                 cron_interval_minutes: row.cron_interval_minutes || 5,
                 email_input: (row.email_receivers && Array.isArray(row.email_receivers))
