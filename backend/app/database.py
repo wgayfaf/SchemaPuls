@@ -73,6 +73,7 @@ def init_db():
 
         env_columns_to_add = [
             ("base_url", "VARCHAR(255)"),
+            ("variables", "TEXT DEFAULT '{}'"),
         ]
         for col_name, col_def in env_columns_to_add:
             try:
@@ -80,6 +81,7 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+
 
         machine_columns_to_add = [
             ("base_url", "VARCHAR(255)"),

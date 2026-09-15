@@ -135,6 +135,17 @@ const app = createApp({
         const apiTestRunning = ref(false);
         const apiTestResult = ref(null);
 
+        // 环境级变量联动响应式状态
+        const currentMachineEnvironment = ref({
+            environment_id: null,
+            name: "默认环境",
+            description: "",
+            variables: {}
+        });
+        const envVarsDialogVisible = ref(false);
+        const envVariablesList = ref([]);
+        const envVariablesSaving = ref(false);
+
         const sampleJsonText = ref("");
         const form = ref({
             name: "",
@@ -970,9 +981,129 @@ const app = createApp({
             }
         };
 
-        // 监听机器选择变动，自动同步更新 Base URL 为该机器配置的基准地址
+        // 获取机器归属的运行环境及其实时环境变量池
+        const fetchMachineEnvironment = async (machineId) => {
+            if (!machineId) {
+                currentMachineEnvironment.value = {
+                    environment_id: null,
+                    name: "未指定环境",
+                    description: "",
+                    variables: {}
+                };
+                return;
+            }
+            try {
+                const res = await axios.get(`/api/machines/${machineId}/environment`);
+                currentMachineEnvironment.value = {
+                    environment_id: res.data.environment_id,
+                    name: res.data.environment_name || "默认环境",
+                    description: res.data.environment_description || "",
+                    variables: res.data.variables || {}
+                };
+            } catch (err) {
+                console.error("获取机器归属环境失败:", err);
+            }
+        };
+
+        const openEnvDialog = () => {
+            const vars = currentMachineEnvironment.value.variables || {};
+            const list = Object.entries(vars).map(([k, v]) => ({
+                key: k,
+                value: typeof v === "object" ? JSON.stringify(v) : String(v)
+            }));
+            if (list.length === 0) {
+                list.push({ key: "", value: "" });
+            }
+            envVariablesList.value = list;
+            envVarsDialogVisible.value = true;
+        };
+
+        const addEnvVarRow = () => {
+            envVariablesList.value.push({ key: "", value: "" });
+        };
+
+        const removeEnvVarRow = (idx) => {
+            envVariablesList.value.splice(idx, 1);
+            if (envVariablesList.value.length === 0) {
+                envVariablesList.value.push({ key: "", value: "" });
+            }
+        };
+
+        const saveEnvVariables = async () => {
+            const envId = currentMachineEnvironment.value.environment_id;
+            if (!envId) {
+                ElementPlus.ElMessage.warning("当前机器未关联到具体的运行环境，无法持久化存储环境变量");
+                return;
+            }
+            const varsObj = {};
+            for (const item of envVariablesList.value) {
+                const k = (item.key || "").trim();
+                if (k) {
+                    let v = item.value;
+                    try {
+                        if (typeof v === "string" && (v.startsWith("{") || v.startsWith("["))) {
+                            v = JSON.parse(v);
+                        }
+                    } catch (e) {
+                        // 保持原字符串
+                    }
+                    varsObj[k] = v;
+                }
+            }
+            envVariablesSaving.value = true;
+            try {
+                const res = await axios.put(`/api/environments/${envId}/variables`, {
+                    variables: varsObj
+                });
+                currentMachineEnvironment.value.variables = res.data.variables || varsObj;
+                ElementPlus.ElMessage.success(`环境 [${currentMachineEnvironment.value.name}] 变量池已成功保存！共 ${Object.keys(varsObj).length} 个变量`);
+                envVarsDialogVisible.value = false;
+            } catch (err) {
+                ElementPlus.ElMessage.error("保存环境变量失败: " + (err.response?.data?.detail || err.message));
+            } finally {
+                envVariablesSaving.value = false;
+            }
+        };
+
+        const copyEnvVarRef = (key) => {
+            if (!key) return;
+            const textToCopy = `{{${key}}}`;
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    ElementPlus.ElMessage.success(`已复制引用代码: ${textToCopy}`);
+                }).catch(() => {
+                    copyFallback(textToCopy);
+                });
+            } else {
+                copyFallback(textToCopy);
+            }
+        };
+
+        const getVarRef = (key) => {
+            return `{{${key || "变量名"}}}`;
+        };
+
+        const copyFallback = (text) => {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand("copy");
+                ElementPlus.ElMessage.success(`已复制引用代码: ${text}`);
+            } catch (err) {
+                ElementPlus.ElMessage.warning(`请手动复制: ${text}`);
+            }
+            document.body.removeChild(textArea);
+        };
+
+        // 监听机器选择变动，自动同步更新 Base URL 与该机器归属的环境及变量池
         watch(() => apiForm.value.machine_id, (newMId) => {
             if (!newMId) return;
+            fetchMachineEnvironment(newMId);
             const m = machineList.value.find(item => item.id === newMId);
             if (!m) return;
             if (m.base_url && m.base_url.trim()) {
@@ -1279,6 +1410,10 @@ const app = createApp({
                 }
             }
 
+            if (mId) {
+                fetchMachineEnvironment(mId);
+            }
+
             apiForm.value = {
                 machine_id: mId,
                 name: "",
@@ -1571,6 +1706,10 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                 }
             }
 
+            if (row.machine_id) {
+                fetchMachineEnvironment(row.machine_id);
+            }
+
             apiForm.value = {
                 machine_id: row.machine_id,
                 name: row.name || "",
@@ -1724,6 +1863,22 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                 };
                 const res = await axios.post("/api/apis/test-run", testPayload);
                 apiTestResult.value = res.data;
+
+                // 同步更新宿主机器所属环境的环境变量池
+                if (res.data.environment) {
+                    currentMachineEnvironment.value.environment_id = res.data.environment.id;
+                    currentMachineEnvironment.value.name = res.data.environment.name || "默认环境";
+                    currentMachineEnvironment.value.variables = res.data.environment.variables || {};
+                    if (res.data.environment.updated_variables && Object.keys(res.data.environment.updated_variables).length > 0) {
+                        const updatedCount = Object.keys(res.data.environment.updated_variables).length;
+                        ElementPlus.ElNotification({
+                            title: "环境变量已同步",
+                            message: `已自动将 ${updatedCount} 个更新变量持久化保存至环境【${res.data.environment.name}】变量池！`,
+                            type: "success",
+                            duration: 4000
+                        });
+                    }
+                }
 
                 if (res.data.assertions_summary && res.data.assertions_summary.total > 0 && !res.data.assertions_summary.all_passed) {
                     apiResponseTab.value = "assertions";
@@ -2507,8 +2662,19 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             applyPreActionPreset,
             addPostActionRow,
             removePostActionRow,
-            onPostActionTypeChange,
-            applyPostActionPreset
+            applyPostActionPreset,
+            // 宿主机器运行环境与环境变量管理导出
+            currentMachineEnvironment,
+            envVarsDialogVisible,
+            envVariablesList,
+            envVariablesSaving,
+            fetchMachineEnvironment,
+            openEnvDialog,
+            addEnvVarRow,
+            removeEnvVarRow,
+            saveEnvVariables,
+            copyEnvVarRef,
+            getVarRef
         };
     }
 });

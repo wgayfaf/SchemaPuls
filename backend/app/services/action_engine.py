@@ -228,16 +228,17 @@ def run_quickjs_pre_script(
     headers: Dict[str, str],
     params: Dict[str, str],
     path: str,
-    body: Optional[str]
-) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, str], str, Optional[str], Optional[str]]:
+    body: Optional[str],
+    environment_variables: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, str], Dict[str, str], str, Optional[str], Optional[str]]:
     """
     使用 QuickJS 执行 Postman 风格 JavaScript 预请求脚本 (ES2020+)
-    返回: (variables, headers, params, path, body, error_message)
+    返回: (variables, updated_env, headers, params, path, body, error_message)
     """
     try:
         import quickjs
     except ImportError:
-        return variables, headers, params, path, body, "QuickJS 运行时未安装，请执行 pip install quickjs"
+        return variables, {}, headers, params, path, body, "QuickJS 运行时未安装，请执行 pip install quickjs"
 
     try:
         ctx = quickjs.Context()
@@ -248,7 +249,9 @@ def run_quickjs_pre_script(
         setup_quickjs_runtime(ctx, script_code)
 
         setup_js = f"""
-        var variables = {json.dumps(variables, ensure_ascii=False)};
+        var environment = {json.dumps(environment_variables or {}, ensure_ascii=False)};
+        var updated_env = {{}};
+        var variables = Object.assign({{}}, environment, {json.dumps(variables, ensure_ascii=False)});
         var headers = {json.dumps(headers, ensure_ascii=False)};
         var params = {json.dumps(params, ensure_ascii=False)};
         var request = {{
@@ -268,8 +271,17 @@ def run_quickjs_pre_script(
                 get: function(k) {{ return variables[String(k)]; }}
             }},
             environment: {{
-                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
-                get: function(k) {{ return variables[String(k)]; }}
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                    variables[String(k)] = val;
+                }},
+                get: function(k) {{
+                    if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
+                    if (environment[String(k)] !== undefined) return environment[String(k)];
+                    return variables[String(k)];
+                }}
             }},
             globals: {{
                 set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
@@ -330,10 +342,11 @@ def run_quickjs_pre_script(
         ctx.eval(setup_js)
         ctx.eval(script_code)
 
-        result_raw = ctx.eval("JSON.stringify({ variables: variables, headers: headers, params: params, request: request, logs: _console_logs })")
+        result_raw = ctx.eval("JSON.stringify({ variables: variables, updated_env: updated_env, headers: headers, params: params, request: request, logs: _console_logs })")
         res_dict = json.loads(result_raw)
 
         new_vars = dict(res_dict.get("variables") or {})
+        updated_env = dict(res_dict.get("updated_env") or {})
         logs = res_dict.get("logs") or []
         if logs:
             new_vars["_console_logs"] = logs
@@ -345,9 +358,9 @@ def run_quickjs_pre_script(
         new_body = req_obj.get("body")
         if new_body is not None and not isinstance(new_body, str):
             new_body = json.dumps(new_body, ensure_ascii=False)
-        return new_vars, new_headers, new_params, new_path, new_body, None
+        return new_vars, updated_env, new_headers, new_params, new_path, new_body, None
     except Exception as e:
-        return variables, headers, params, path, body, str(e)
+        return variables, {}, headers, params, path, body, str(e)
 
 
 def run_quickjs_post_script(
@@ -357,16 +370,17 @@ def run_quickjs_post_script(
     response_data: Any,
     response_text: Optional[str],
     response_headers: Dict[str, str],
-    context_variables: Dict[str, Any]
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Optional[str]]:
+    context_variables: Dict[str, Any],
+    environment_variables: Optional[Dict[str, Any]] = None
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any], Optional[str]]:
     """
     使用 QuickJS 执行 Postman Tests 风格 JavaScript 测试脚本 (ES2020+)
-    返回: (assertions_result, extracted_vars, error_message)
+    返回: (assertions_result, extracted_vars, updated_env, error_message)
     """
     try:
         import quickjs
     except ImportError:
-        return [], {}, "QuickJS 运行时未安装，请执行 pip install quickjs"
+        return [], {}, {}, "QuickJS 运行时未安装，请执行 pip install quickjs"
 
     try:
         ctx = quickjs.Context()
@@ -383,6 +397,8 @@ def run_quickjs_post_script(
         var response_text = {json.dumps(response_text or "", ensure_ascii=False)};
         var resp_headers = {json.dumps(response_headers, ensure_ascii=False)};
         var context_variables = {json.dumps(context_variables, ensure_ascii=False)};
+        var environment = {json.dumps(environment_variables or {}, ensure_ascii=False)};
+        var updated_env = {{}};
         var extracted_vars = {{}};
         var assertions = [];
         var _console_logs = [];
@@ -458,27 +474,42 @@ def run_quickjs_post_script(
                 }}
             }},
             variables: {{
-                set: function(k, v) {{ extracted_vars[String(k)] = v; }},
-                get: function(k) {{ return extracted_vars[String(k)] !== undefined ? extracted_vars[String(k)] : context_variables[String(k)]; }}
+                set: function(k, v) {{ extracted_vars[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                get: function(k) {{
+                    if (extracted_vars[String(k)] !== undefined) return extracted_vars[String(k)];
+                    if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
+                    if (environment[String(k)] !== undefined) return environment[String(k)];
+                    return context_variables[String(k)];
+                }}
             }},
             environment: {{
-                set: function(k, v) {{ extracted_vars[String(k)] = v; }},
-                get: function(k) {{ return extracted_vars[String(k)] !== undefined ? extracted_vars[String(k)] : context_variables[String(k)]; }}
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                    extracted_vars[String(k)] = val;
+                }},
+                get: function(k) {{
+                    if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
+                    if (environment[String(k)] !== undefined) return environment[String(k)];
+                    return context_variables[String(k)];
+                }}
             }}
         }};
         """
         ctx.eval(setup_js)
         ctx.eval(script_code)
 
-        result_raw = ctx.eval("JSON.stringify({ assertions: assertions, extracted_vars: extracted_vars, logs: _console_logs })")
+        result_raw = ctx.eval("JSON.stringify({ assertions: assertions, extracted_vars: extracted_vars, updated_env: updated_env, logs: _console_logs })")
         res_dict = json.loads(result_raw)
-        extracted = res_dict.get("extracted_vars", {})
+        extracted = dict(res_dict.get("extracted_vars") or {})
+        updated_env = dict(res_dict.get("updated_env") or {})
         logs = res_dict.get("logs") or []
         if logs:
             extracted["_console_logs"] = logs
-        return res_dict.get("assertions", []), extracted, None
+        return res_dict.get("assertions", []), extracted, updated_env, None
     except Exception as e:
-        return [], {}, str(e)
+        return [], {}, {}, str(e)
 
 
 
@@ -488,23 +519,37 @@ def execute_pre_actions(
     params: Optional[Dict[str, str]] = None,
     body: Optional[str] = None,
     path: Optional[str] = None,
-    auth_token: Optional[str] = None
-) -> Tuple[Dict[str, str], Dict[str, str], Optional[str], Optional[str], Dict[str, Any]]:
+    auth_token: Optional[str] = None,
+    environment_variables: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, str], Dict[str, str], Optional[str], Optional[str], Dict[str, Any], Dict[str, Any]]:
     """
     执行前置操作列表
-    返回: (final_headers, final_params, final_body, final_path, variables)
+    返回: (final_headers, final_params, final_body, final_path, variables, updated_env_vars)
     """
     req_headers = dict(headers or {})
     req_params = dict(params or {})
     req_body = body
     req_path = path or ""
-    variables: Dict[str, Any] = {}
+
+    # 继承当前环境的环境变量作为初始变量池
+    env_vars = dict(environment_variables or {})
+    variables: Dict[str, Any] = dict(env_vars)
+    updated_env_vars: Dict[str, Any] = {}
 
     if auth_token:
         variables["TOKEN"] = auth_token
 
     if not pre_actions or not isinstance(pre_actions, list):
-        return req_headers, req_params, req_body, req_path, variables
+        # 即使无 pre_actions，也使用环境上下文变量渲染
+        combined_ctx: Dict[str, Any] = {}
+        combined_ctx.update(req_headers)
+        combined_ctx.update(req_params)
+        combined_ctx.update(variables)
+        final_headers = {k: render_with_variables(v, combined_ctx, auth_token) for k, v in req_headers.items()}
+        final_params = {k: render_with_variables(v, combined_ctx, auth_token) for k, v in req_params.items()}
+        final_body = render_with_variables(req_body, combined_ctx, auth_token)
+        final_path = render_with_variables(req_path, combined_ctx, auth_token)
+        return final_headers, final_params, final_body, final_path, variables, updated_env_vars
 
     for action in pre_actions:
         if not isinstance(action, dict) or not action.get("enabled", True):
@@ -530,22 +575,28 @@ def execute_pre_actions(
             # QuickJS Postman-style JavaScript 预请求脚本执行
             script_code = action.get("value", "") or action.get("script", "")
             if script_code and isinstance(script_code, str):
-                variables, req_headers, req_params, req_path, req_body, js_err = run_quickjs_pre_script(
+                new_vars, js_updated_env, req_headers, req_params, req_path, req_body, js_err = run_quickjs_pre_script(
                     script_code=script_code,
                     variables=variables,
                     headers=req_headers,
                     params=req_params,
                     path=req_path,
-                    body=req_body
+                    body=req_body,
+                    environment_variables=env_vars
                 )
+                variables.update(new_vars)
+                updated_env_vars.update(js_updated_env)
+                env_vars.update(js_updated_env)
                 if js_err:
                     variables["_script_error"] = f"[JS执行异常] {js_err}"
         elif act_type == "custom_script":
             # 简易受限 Python 预请求脚本执行
             script_code = action.get("value", "") or action.get("script", "")
             if script_code and isinstance(script_code, str):
+                orig_env_snapshot = dict(env_vars)
                 local_scope = {
                     "variables": variables,
+                    "environment": env_vars,
                     "headers": req_headers,
                     "params": req_params,
                     "body": req_body,
@@ -565,6 +616,13 @@ def execute_pre_actions(
                         req_body = local_scope["body"]
                     if "path" in local_scope:
                         req_path = local_scope["path"]
+                    # 检测 Python 脚本对 environment 的修改
+                    if "environment" in local_scope and isinstance(local_scope["environment"], dict):
+                        for ek, ev in local_scope["environment"].items():
+                            if ek not in orig_env_snapshot or orig_env_snapshot[ek] != ev:
+                                updated_env_vars[ek] = ev
+                                variables[ek] = ev
+                                env_vars[ek] = ev
                 except Exception as e:
                     variables["_script_error"] = str(e)
 
@@ -580,7 +638,7 @@ def execute_pre_actions(
     final_body = render_with_variables(req_body, combined_ctx, auth_token)
     final_path = render_with_variables(req_path, combined_ctx, auth_token)
 
-    return final_headers, final_params, final_body, final_path, variables
+    return final_headers, final_params, final_body, final_path, variables, updated_env_vars
 
 
 def execute_post_actions(
@@ -590,15 +648,22 @@ def execute_post_actions(
     response_headers: Optional[Dict[str, str]] = None,
     response_data: Any = None,
     response_text: Optional[str] = None,
-    context_variables: Optional[Dict[str, Any]] = None
-) -> Tuple[bool, List[Dict[str, Any]], Dict[str, Any]]:
+    context_variables: Optional[Dict[str, Any]] = None,
+    environment_variables: Optional[Dict[str, Any]] = None
+) -> Tuple[bool, List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
     """
     执行后置操作列表 (自动化断言校验与变量提取)
-    返回: (all_passed: bool, assertions_result: List[Dict], extracted_variables: Dict)
+    返回: (all_passed: bool, assertions_result: List[Dict], extracted_variables: Dict, updated_env_vars: Dict)
     """
     assertions_result: List[Dict[str, Any]] = []
     extracted_vars: Dict[str, Any] = {}
+    updated_env_vars: Dict[str, Any] = {}
     resp_headers = {k.lower(): v for k, v in (response_headers or {}).items()}
+
+    env_vars = dict(environment_variables or {})
+    all_context: Dict[str, Any] = dict(env_vars)
+    if context_variables:
+        all_context.update(context_variables)
 
     # 预备文本供 contains 比对
     raw_text = response_text
@@ -610,7 +675,7 @@ def execute_post_actions(
     raw_text = raw_text or ""
 
     if not post_actions or not isinstance(post_actions, list):
-        return True, assertions_result, extracted_vars
+        return True, assertions_result, extracted_vars, updated_env_vars
 
     for action in post_actions:
         if not isinstance(action, dict) or not action.get("enabled", True):
@@ -623,15 +688,14 @@ def execute_post_actions(
         expr = action.get("expression", "")
 
         # 变量替换期望值: 如期望值也是变量 {{expected_code}}
-        if context_variables and isinstance(target_val, str):
-            for vk, vv in context_variables.items():
+        if all_context and isinstance(target_val, str):
+            for vk, vv in all_context.items():
                 target_val = target_val.replace(f"{{{{{vk}}}}}", str(vv))
 
         passed = False
         actual_val = None
         message = ""
 
-        # 1. 状态码断言
         if act_type == "assert_status_code":
             actual_val = status_code
             if status_code is None:
@@ -639,20 +703,32 @@ def execute_post_actions(
                 message = "未收到 HTTP 响应状态码 (请求超时或连接失败)"
             elif op == "in_2xx":
                 passed = (200 <= status_code < 300)
-                message = f"实际状态码: {status_code} (期望: 2xx)"
+                message = f"实际状态码: {status_code} (期望处于 2xx 成功范围)"
+                target_val = "2xx"
+            elif op == "equals":
+                try:
+                    passed = (status_code == int(target_val))
+                    message = f"实际状态码: {status_code} (期望等于: {target_val})"
+                except Exception:
+                    passed = False
+                    message = f"期望值 [{target_val}] 不是有效数字"
             elif op == "not_equals":
-                passed = (str(status_code) != str(target_val))
-                message = f"实际状态码: {status_code} (期望不等于: {target_val})"
-            else: # equals
-                passed = (str(status_code) == str(target_val))
-                message = f"实际状态码: {status_code} (期望: {target_val})"
+                try:
+                    passed = (status_code != int(target_val))
+                    message = f"实际状态码: {status_code} (期望不等于: {target_val})"
+                except Exception:
+                    passed = False
+                    message = f"期望值 [{target_val}] 不是有效数字"
+            else:
+                passed = False
+                message = f"未知操作符: {op}"
 
             assertions_result.append({
-                "name": name or f"HTTP 状态码等于 {target_val}",
+                "name": name or f"状态码校验 ({op})",
                 "type": act_type,
                 "passed": passed,
                 "actual": actual_val,
-                "expected": target_val if op != "in_2xx" else "2xx",
+                "expected": target_val,
                 "operator": op,
                 "message": message
             })
@@ -773,6 +849,9 @@ def execute_post_actions(
             found, val = get_nested_value(response_data, expr)
             if found:
                 extracted_vars[var_name] = val
+                updated_env_vars[var_name] = val
+                env_vars[var_name] = val
+                all_context[var_name] = val
                 assertions_result.append({
                     "name": name or f"提取变量 [{var_name}]",
                     "type": act_type,
@@ -781,13 +860,16 @@ def execute_post_actions(
                     "actual": val,
                     "expected": var_name,
                     "operator": "extract",
-                    "message": f"成功提取变量 {var_name} = {val}"
+                    "message": f"成功提取变量 {var_name} = {val} (已同步环境)"
                 })
             else:
                 # 尝试从响应头提取
                 h_val = resp_headers.get(expr.strip().lower())
                 if h_val is not None:
                     extracted_vars[var_name] = h_val
+                    updated_env_vars[var_name] = h_val
+                    env_vars[var_name] = h_val
+                    all_context[var_name] = h_val
                     assertions_result.append({
                         "name": name or f"提取Header变量 [{var_name}]",
                         "type": act_type,
@@ -796,7 +878,7 @@ def execute_post_actions(
                         "actual": h_val,
                         "expected": var_name,
                         "operator": "extract",
-                        "message": f"成功提取Header变量 {var_name} = {h_val}"
+                        "message": f"成功提取Header变量 {var_name} = {h_val} (已同步环境)"
                     })
                 else:
                     assertions_result.append({
@@ -814,14 +896,15 @@ def execute_post_actions(
         elif act_type in ["javascript", "js_script"]:
             script_code = action.get("value", "") or action.get("expression", "") or action.get("script", "")
             if script_code and isinstance(script_code, str):
-                js_assertions, js_extracted, js_err = run_quickjs_post_script(
+                js_assertions, js_extracted, js_updated_env, js_err = run_quickjs_post_script(
                     script_code=script_code,
                     status_code=status_code,
                     latency_ms=latency_ms,
                     response_data=response_data,
                     response_text=raw_text,
                     response_headers=resp_headers,
-                    context_variables=context_variables or {}
+                    context_variables=all_context,
+                    environment_variables=env_vars
                 )
                 if js_err:
                     assertions_result.append({
@@ -845,9 +928,12 @@ def execute_post_actions(
                             "message": ja.get("message", "")
                         })
                     extracted_vars.update(js_extracted)
+                    updated_env_vars.update(js_updated_env)
+                    env_vars.update(js_updated_env)
+                    all_context.update(js_extracted)
 
     # 判定全部断言是否通过 (忽略 extract_variable)
     pure_assertions = [a for a in assertions_result if a.get("type") != "extract_variable"]
     all_passed = all(a["passed"] for a in pure_assertions) if pure_assertions else True
 
-    return all_passed, assertions_result, extracted_vars
+    return all_passed, assertions_result, extracted_vars, updated_env_vars

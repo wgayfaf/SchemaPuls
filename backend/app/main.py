@@ -216,6 +216,62 @@ def delete_environment(id: int, session: Session = Depends(get_session)):
     return {"status": "ok", "message": f"环境 id={id} [{env.name}] 及其下属资产已删除"}
 
 
+@app.get("/api/environments/{id}/variables")
+def get_environment_variables(id: int, session: Session = Depends(get_session)):
+    """获取指定运行环境的环境变量池"""
+    env = session.get(Environment, id)
+    if not env:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    return {
+        "environment_id": env.id,
+        "environment_name": env.name,
+        "variables": env.variables or {}
+    }
+
+
+class EnvironmentVariablesPayload(BaseModel):
+    variables: Dict[str, Any]
+
+
+@app.put("/api/environments/{id}/variables")
+def update_environment_variables(id: int, data: EnvironmentVariablesPayload, session: Session = Depends(get_session)):
+    """更新指定运行环境的环境变量池"""
+    env = session.get(Environment, id)
+    if not env:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    env.variables = dict(data.variables or {})
+    session.add(env)
+    session.commit()
+    session.refresh(env)
+    return {
+        "status": "ok",
+        "environment_id": env.id,
+        "environment_name": env.name,
+        "variables": env.variables
+    }
+
+
+@app.get("/api/machines/{machine_id}/environment")
+def get_machine_environment(machine_id: int, session: Session = Depends(get_session)):
+    """根据机器节点获取其归属的运行环境及当前环境变量池"""
+    machine = session.get(MachineNode, machine_id)
+    if not machine:
+        raise HTTPException(status_code=404, detail="MachineNode not found")
+    grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
+    env = session.get(Environment, grp.environment_id) if grp and grp.environment_id else None
+    return {
+        "machine_id": machine.id,
+        "machine_name": machine.name,
+        "group_id": grp.id if grp else None,
+        "group_name": grp.name if grp else None,
+        "environment_id": env.id if env else None,
+        "environment_name": env.name if env else "默认环境",
+        "environment_description": env.description if env else "",
+        "environment_base_url": env.base_url if env else None,
+        "variables": env.variables or {} if env else {}
+    }
+
+
 # 2. 分组层 CRUD
 @app.get("/api/groups", response_model=List[ServiceGroup])
 def list_service_groups(environment_id: Optional[int] = None, session: Session = Depends(get_session)):
@@ -601,6 +657,11 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
     if not machine:
         raise HTTPException(status_code=404, detail="Associated MachineNode not found")
 
+    # 关联宿主机器的环境与环境变量
+    grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
+    env = session.get(Environment, grp.environment_id) if grp and grp.environment_id else None
+    env_vars = dict(env.variables or {}) if env and env.variables else {}
+
     auth_token = None
     if data.auth_type == "bearer":
         auth_token = data.auth_config.get("token")
@@ -631,13 +692,14 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
 
     # 执行【前置操作 (Pre-request Actions)】
     from app.services.action_engine import execute_pre_actions, execute_post_actions
-    final_headers, final_params, final_body, final_path, variables = execute_pre_actions(
+    final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
         pre_actions=data.pre_actions,
         headers=req_headers,
         params=req_params,
         body=rendered_body,
         path=rendered_path,
-        auth_token=auth_token
+        auth_token=auth_token,
+        environment_variables=env_vars
     )
 
     if not final_path.startswith("/"):
@@ -674,15 +736,29 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
             schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
 
     # 执行【后置操作 (Post-response Actions / Assertions)】
-    all_assertions_passed, assertions_result, extracted_vars = execute_post_actions(
+    all_assertions_passed, assertions_result, extracted_vars, post_updated_env = execute_post_actions(
         post_actions=data.post_actions,
         status_code=http_code,
         latency_ms=http_ms,
         response_headers=resp_headers,
         response_data=json_data,
         response_text=resp_text,
-        context_variables=variables
+        context_variables=variables,
+        environment_variables=env_vars
     )
+
+    # 同步环境变量更新并持久化到数据库
+    all_updated_env = {}
+    all_updated_env.update(pre_updated_env)
+    all_updated_env.update(post_updated_env)
+    if all_updated_env and env:
+        current_vars = dict(env.variables or {})
+        current_vars.update(all_updated_env)
+        env.variables = current_vars
+        session.add(env)
+        session.commit()
+        session.refresh(env)
+        env_vars = current_vars
 
     return {
         "status_code": http_code,
@@ -701,6 +777,12 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         },
         "assertions_result": assertions_result,
         "extracted_variables": extracted_vars,
+        "environment": {
+            "id": env.id if env else None,
+            "name": env.name if env else "默认环境",
+            "variables": env_vars,
+            "updated_variables": all_updated_env
+        },
         "request_url": url,
         "resolved_url": url,
         "rendered_headers": final_headers,

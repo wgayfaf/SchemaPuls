@@ -36,7 +36,7 @@ def test_action_engine_unit():
         {"enabled": True, "type": "inject_param", "key": "ts", "value": "{{dyn_ts}}"},
         {"enabled": True, "type": "custom_script", "key": "", "value": "variables['sign'] = 'SIGN_' + variables['app_ver']"}
     ]
-    headers, params, body, path, vars_out = execute_pre_actions(
+    headers, params, body, path, vars_out, _ = execute_pre_actions(
         pre_actions=pre_actions,
         headers={"Accept": "application/json"},
         params={"page": "1"},
@@ -84,7 +84,7 @@ def test_action_engine_unit():
         {"enabled": True, "name": "响应包含success", "type": "assert_body_contains", "operator": "contains", "target_value": "success"},
         {"enabled": True, "name": "提取Token", "type": "extract_variable", "expression": "data.token", "target_value": "extractedToken"}
     ]
-    all_passed, results, extracted = execute_post_actions(
+    all_passed, results, extracted, _ = execute_post_actions(
         post_actions=post_actions,
         status_code=200,
         latency_ms=120.5,
@@ -104,7 +104,7 @@ def test_action_engine_unit():
         {"enabled": True, "name": "状态码应为500", "type": "assert_status_code", "operator": "equals", "target_value": "500"},
         {"enabled": True, "name": "耗时超速断言", "type": "assert_latency", "operator": "less_than", "target_value": "50"}
     ]
-    fail_passed, fail_res, _ = execute_post_actions(
+    fail_passed, fail_res, _, _ = execute_post_actions(
         post_actions=fail_actions,
         status_code=200,
         latency_ms=120.5,
@@ -126,7 +126,7 @@ def test_action_engine_unit():
             params['page'] = '99';
         """}
     ]
-    js_headers, js_params, js_body, js_path, js_vars = execute_pre_actions(
+    js_headers, js_params, js_body, js_path, js_vars, _ = execute_pre_actions(
         pre_actions=js_pre_actions,
         headers={"Content-Type": "application/json"},
         params={"page": "1"},
@@ -157,7 +157,7 @@ def test_action_engine_unit():
             pm.environment.set("js_extracted_user", json.data.user.name);
         """}
     ]
-    js_all_passed, js_results, js_extracted = execute_post_actions(
+    js_all_passed, js_results, js_extracted, _ = execute_post_actions(
         post_actions=js_post_actions,
         status_code=200,
         latency_ms=88.0,
@@ -272,7 +272,7 @@ def test_body_json_with_pre_action_parameters():
         "salt": "{{dyn_salt}}",
         "timestamp": "{{$timestamp}}"
     })
-    final_headers, final_params, final_body, final_path, variables = execute_pre_actions(
+    final_headers, final_params, final_body, final_path, variables, _ = execute_pre_actions(
         pre_actions=pre_actions,
         headers={"Content-Type": "application/json"},
         params={},
@@ -296,7 +296,7 @@ def test_body_json_with_pre_action_parameters():
             pm.request.body.update(currentBody);
         """}
     ]
-    _, _, modified_body, _, _ = execute_pre_actions(
+    _, _, modified_body, _, _, _ = execute_pre_actions(
         pre_actions=js_modify_body_action,
         body='{"initial_val": 1}'
     )
@@ -379,7 +379,7 @@ def test_crypto_libraries_require():
         {"enabled": True, "type": "javascript", "value": cryptojs_script}
     ]
 
-    headers, params, body, path, vars_out = execute_pre_actions(
+    headers, params, body, path, vars_out, _ = execute_pre_actions(
         pre_actions=pre_actions,
         headers={"Content-Type": "application/json"},
         params={},
@@ -468,14 +468,220 @@ def test_api_crud_and_persistence():
     print(f"[OK] 清理测试接口完成")
 
 
+def test_chain_environment_variables():
+    print("\n==================================================")
+    print("   4. 测试多接口链式调用与环境变量共享持久化")
+    print("==================================================")
+    init_db()
+    with Session(engine) as session:
+        # 1. 获取或创建测试环境
+        env = session.exec(select(Environment).where(Environment.name == "自动化测试环境")).first()
+        if not env:
+            env = Environment(name="自动化测试环境", description="测试环境变量持久化", variables={"EXISTING_VAR": "hello_world"})
+            session.add(env)
+            session.commit()
+            session.refresh(env)
+        else:
+            env.variables = {"EXISTING_VAR": "hello_world"}
+            session.add(env)
+            session.commit()
+            session.refresh(env)
+
+        # 2. 模拟接口 A (登录接口) 的后置脚本: pm.environment.set("JWT_TOKEN", "mocked_jwt_token_999")
+        post_actions_a = [
+            {
+                "type": "javascript",
+                "enabled": True,
+                "value": """
+                pm.test("登录成功", function() {
+                    pm.expect(pm.response.code).to.equal(200);
+                });
+                var data = pm.response.json();
+                pm.environment.set("JWT_TOKEN", data.token);
+                pm.environment.set("USER_ID", data.user_id);
+                """
+            }
+        ]
+
+        all_passed, asserts, extracted, updated_env = execute_post_actions(
+            post_actions=post_actions_a,
+            status_code=200,
+            latency_ms=45.0,
+            response_data={"code": 0, "token": "mocked_jwt_token_999", "user_id": 10086},
+            environment_variables=env.variables
+        )
+
+        assert all_passed is True
+        assert updated_env.get("JWT_TOKEN") == "mocked_jwt_token_999"
+        assert updated_env.get("USER_ID") == 10086
+
+        # 持久化写回环境
+        curr_vars = dict(env.variables or {})
+        curr_vars.update(updated_env)
+        env.variables = curr_vars
+        session.add(env)
+        session.commit()
+        session.refresh(env)
+
+        assert env.variables.get("JWT_TOKEN") == "mocked_jwt_token_999"
+
+        # 3. 模拟接口 B (业务探测接口): 请求头使用 Authorization: Bearer {{JWT_TOKEN}}，body 包含 {"uid": {{USER_ID}}}
+        headers_b = {"Authorization": "Bearer {{JWT_TOKEN}}", "Content-Type": "application/json"}
+        params_b = {"token_check": "{{JWT_TOKEN}}"}
+        body_b = '{"user_id": {{USER_ID}}, "auth": "{{JWT_TOKEN}}"}'
+        path_b = "/api/v1/user/{{USER_ID}}"
+
+        final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
+            pre_actions=[],
+            headers=headers_b,
+            params=params_b,
+            body=body_b,
+            path=path_b,
+            environment_variables=env.variables
+        )
+
+        assert final_headers["Authorization"] == "Bearer mocked_jwt_token_999"
+        assert final_params["token_check"] == "mocked_jwt_token_999"
+        assert '"user_id": 10086' in final_body
+        assert '"auth": "mocked_jwt_token_999"' in final_body
+        assert final_path == "/api/v1/user/10086"
+        print("[OK] 多接口链式调用与环境变量共享持久化验证通过！")
+
+
+def test_cross_environment_isolation():
+    print("\n==================================================")
+    print("   5. 测试基于宿主机器的跨环境隔离与变量管理 API")
+    print("==================================================")
+    init_db()
+    client = TestClient(app)
+
+    with Session(engine) as session:
+        # 创建环境 A (开发环境) 与环境 B (生产环境)
+        env_dev = session.exec(select(Environment).where(Environment.name == "隔离测试_开发环境")).first()
+        if not env_dev:
+            env_dev = Environment(name="隔离测试_开发环境", variables={"ENV_FLAG": "DEV_ONLY", "SECRET_KEY": "dev_secret_123"})
+            session.add(env_dev)
+            session.commit()
+            session.refresh(env_dev)
+        else:
+            env_dev.variables = {"ENV_FLAG": "DEV_ONLY", "SECRET_KEY": "dev_secret_123"}
+            session.add(env_dev)
+            session.commit()
+            session.refresh(env_dev)
+
+        env_prod = session.exec(select(Environment).where(Environment.name == "隔离测试_生产环境")).first()
+        if not env_prod:
+            env_prod = Environment(name="隔离测试_生产环境", variables={"ENV_FLAG": "PROD_ONLY", "SECRET_KEY": "prod_secret_888"})
+            session.add(env_prod)
+            session.commit()
+            session.refresh(env_prod)
+        else:
+            env_prod.variables = {"ENV_FLAG": "PROD_ONLY", "SECRET_KEY": "prod_secret_888"}
+            session.add(env_prod)
+            session.commit()
+            session.refresh(env_prod)
+
+        # 关联集群
+        grp_dev = session.exec(select(ServiceGroup).where(ServiceGroup.name == "隔离测试_开发集群")).first()
+        if not grp_dev:
+            grp_dev = ServiceGroup(environment_id=env_dev.id, name="隔离测试_开发集群")
+            session.add(grp_dev)
+            session.commit()
+            session.refresh(grp_dev)
+
+        grp_prod = session.exec(select(ServiceGroup).where(ServiceGroup.name == "隔离测试_生产集群")).first()
+        if not grp_prod:
+            grp_prod = ServiceGroup(environment_id=env_prod.id, name="隔离测试_生产集群")
+            session.add(grp_prod)
+            session.commit()
+            session.refresh(grp_prod)
+
+        # 关联机器节点
+        m_dev = session.exec(select(MachineNode).where(MachineNode.name == "开发机_Node1")).first()
+        if not m_dev:
+            m_dev = MachineNode(group_id=grp_dev.id, name="开发机_Node1", host="127.0.0.1", port=8000, is_active=True)
+            session.add(m_dev)
+            session.commit()
+            session.refresh(m_dev)
+
+        m_prod = session.exec(select(MachineNode).where(MachineNode.name == "生产机_Node2")).first()
+        if not m_prod:
+            m_prod = MachineNode(group_id=grp_prod.id, name="生产机_Node2", host="127.0.0.1", port=8000, is_active=True)
+            session.add(m_prod)
+            session.commit()
+            session.refresh(m_prod)
+
+        m_dev_id = m_dev.id
+        m_prod_id = m_prod.id
+        env_dev_id = env_dev.id
+        env_prod_id = env_prod.id
+
+    # 1. 验证 GET /api/machines/{m_id}/environment 能够精确识别宿主环境
+    resp_dev = client.get(f"/api/machines/{m_dev_id}/environment")
+    assert resp_dev.status_code == 200
+    env_data_dev = resp_dev.json()
+    assert env_data_dev["environment_name"] == "隔离测试_开发环境"
+    assert env_data_dev["variables"]["ENV_FLAG"] == "DEV_ONLY"
+    assert env_data_dev["variables"]["SECRET_KEY"] == "dev_secret_123"
+
+    resp_prod = client.get(f"/api/machines/{m_prod_id}/environment")
+    assert resp_prod.status_code == 200
+    env_data_prod = resp_prod.json()
+    assert env_data_prod["environment_name"] == "隔离测试_生产环境"
+    assert env_data_prod["variables"]["ENV_FLAG"] == "PROD_ONLY"
+    assert env_data_prod["variables"]["SECRET_KEY"] == "prod_secret_888"
+
+    # 2. 验证 PUT /api/environments/{env_id}/variables 增改环境变量
+    update_res = client.put(f"/api/environments/{env_dev_id}/variables", json={
+        "variables": {"ENV_FLAG": "DEV_ONLY", "SECRET_KEY": "dev_secret_123", "NEW_CUSTOM_VAR": "CUSTOM_VAL_777"}
+    })
+    assert update_res.status_code == 200
+    get_res = client.get(f"/api/environments/{env_dev_id}/variables")
+    assert get_res.status_code == 200
+    assert get_res.json()["variables"].get("NEW_CUSTOM_VAR") == "CUSTOM_VAL_777"
+
+    # 3. 验证开发机 test-run 提取新变量并持久化，同时验证生产机环境变量池未受任何污染
+    test_run_payload = {
+        "machine_id": m_dev_id,
+        "http_method": "GET",
+        "http_path": "/api/dashboard/summary",
+        "http_headers": [
+            {"enabled": True, "key": "X-Env-Check", "value": "{{ENV_FLAG}}"}
+        ],
+        "post_actions": [
+            {"enabled": True, "type": "javascript", "value": "pm.environment.set('DEV_SESSION_TOKEN', 'SESS_DEV_555');"}
+        ]
+    }
+    run_resp = client.post("/api/apis/test-run", json=test_run_payload)
+    assert run_resp.status_code == 200
+    run_data = run_resp.json()
+    assert run_data["rendered_headers"].get("X-Env-Check") == "DEV_ONLY"
+    assert run_data.get("environment", {}).get("updated_variables", {}).get("DEV_SESSION_TOKEN") == "SESS_DEV_555"
+
+    # 验证环境 A 确实被持久化写入了 DEV_SESSION_TOKEN
+    with Session(engine) as session:
+        check_dev = session.get(Environment, env_dev_id)
+        assert check_dev.variables.get("DEV_SESSION_TOKEN") == "SESS_DEV_555"
+
+        # 验证环境 B 绝对隔离，没有 DEV_SESSION_TOKEN
+        check_prod = session.get(Environment, env_prod_id)
+        assert "DEV_SESSION_TOKEN" not in check_prod.variables
+        assert check_prod.variables.get("ENV_FLAG") == "PROD_ONLY"
+
+    print("[OK] 基于宿主机器的跨环境隔离与变量管理 API 验证全部通过！")
+
+
 if __name__ == "__main__":
     test_action_engine_unit()
     test_api_test_run_with_actions()
     test_body_json_with_pre_action_parameters()
     test_crypto_libraries_require()
     test_api_crud_and_persistence()
+    test_chain_environment_variables()
+    test_cross_environment_isolation()
     print("\n==================================================")
     print("🎉🎉 全部前置操作与后置操作测试 100% 通过！ 🎉🎉")
     print("==================================================")
+
 
 

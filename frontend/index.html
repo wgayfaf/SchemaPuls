@@ -1480,16 +1480,26 @@ export SMTP_USE_SSL="true"
                 </el-row>
             </div>
 
-            <!-- 宿主机器前置服务基准地址提示与同步条 -->
+            <!-- 宿主机器与环境联动信息条 (支持环境变量查看与实时调用) -->
             <div
-                style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 12px; border: 1px solid #e2e8f0;">
-                <div style="display: flex; align-items: center; gap: 8px;">
+                style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 12px; border: 1px solid #e2e8f0; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     <span style="font-weight: 600; color: #475569;">
                         <i class="fa-solid fa-server" style="color: #0284c7; margin-right: 4px;"></i>宿主机器:
                     </span>
                     <span style="font-weight: 600; color: #0f172a;">
                         {{ selectedMachineDisplayName }}
                     </span>
+                    <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+                    <span style="font-weight: 600; color: #475569;">
+                        <i class="fa-solid fa-layer-group" style="color: #10b981; margin-right: 4px;"></i>所属环境:
+                    </span>
+                    <el-tag size="small" type="success" effect="plain" style="font-weight: 600;">
+                        {{ currentMachineEnvironment.name || '默认环境' }}
+                    </el-tag>
+                    <el-button size="small" type="warning" plain @click="openEnvDialog" style="border-radius: 14px; padding: 2px 10px; height: 24px;">
+                        <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>环境变量 ({{ Object.keys(currentMachineEnvironment.variables || {}).length }})
+                    </el-button>
                     <span style="color: #cbd5e1; margin: 0 4px;">|</span>
                     <span style="color: #64748b;">
                         机器默认地址:
@@ -1504,7 +1514,7 @@ export SMTP_USE_SSL="true"
                 </div>
                 <div style="color: #64748b; font-size: 11.5px; display: flex; align-items: center; gap: 4px;">
                     <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i>
-                    <span>基准地址可自主修改 (支持 http/https、域名与端口)，亦可直接在路径栏粘贴完整 URL 自动拆分</span>
+                    <span>在 URL/Header/Body 中均可直接使用 <code v-pre>{{变量名}}</code> 引用环境变量</span>
                 </div>
             </div>
 
@@ -2139,6 +2149,36 @@ export SMTP_USE_SSL="true"
                                     </span>
                                 </div>
                             </div>
+
+                            <!-- 环境变量持久化回写同步提示条 (Apifox 风格) -->
+                            <div v-if="apiTestResult.environment && apiTestResult.environment.updated_variables && Object.keys(apiTestResult.environment.updated_variables).length > 0"
+                                style="margin-top: 12px; background: #f0fdf4; border: 1px solid #86efac; border-radius: 6px; padding: 10px 14px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                                    <div style="font-size: 12.5px; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 6px;">
+                                        <i class="fa-solid fa-cloud-arrow-up" style="color: #15803d;"></i>
+                                        已自动同步持久化至环境 [{{ apiTestResult.environment.name }}] 变量池:
+                                    </div>
+                                    <el-button size="small" type="success" link @click="openEnvDialog">
+                                        <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>查看环境变量列表
+                                    </el-button>
+                                </div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                    <div v-for="(uVal, uKey) in apiTestResult.environment.updated_variables" :key="uKey"
+                                        style="background: #ffffff; border: 1px solid #bbf7d0; border-radius: 4px; padding: 3px 8px; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                                        <span style="font-weight: 600; color: #15803d;">{{ uKey }}</span>
+                                        <span style="color: #94a3b8;">=</span>
+                                        <span style="color: #334155; font-family: monospace; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ uVal }}</span>
+                                        <el-tooltip content="点击一键复制引用语法" placement="top">
+                                            <el-button size="small" link type="primary" @click="copyEnvVarRef(uKey)">
+                                                <i class="fa-regular fa-copy"></i>
+                                            </el-button>
+                                        </el-tooltip>
+                                    </div>
+                                </div>
+                                <div style="font-size: 11px; color: #15803d; margin-top: 6px;">
+                                    💡 提示：该环境下的后续接口可直接使用 <code v-pre>{{变量名}}</code> 引用上述变量。
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2154,6 +2194,80 @@ export SMTP_USE_SSL="true"
                         <el-button @click="apiDialogVisible = false">取消</el-button>
                         <el-button type="primary" @click="submitApiForm" :loading="apiSubmitting">
                             {{ editingApiId ? '保存修改并更新调度' : '确认创建并接入调度' }}
+                        </el-button>
+                    </div>
+                </div>
+            </template>
+        </el-dialog>
+
+        <!-- 环境级变量查看与管理对话框 (Apifox 风格) -->
+        <el-dialog v-model="envVarsDialogVisible"
+            :title="'环境变量管理 - ' + (currentMachineEnvironment.name || '运行环境')"
+            width="750px" top="8vh" destroy-on-close>
+            <div style="margin-bottom: 14px;">
+                <div style="font-size: 13px; color: #475569; line-height: 1.5; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 10px 14px;">
+                    <i class="fa-solid fa-circle-info" style="color: #0284c7; margin-right: 6px;"></i>
+                    当前宿主机器归属于 <strong>{{ currentMachineEnvironment.name }}</strong>。在此维护的环境变量在该环境下的所有接口中全局生效，支持在 URL、Headers、Params、Body 中通过 <code v-pre>{{变量名}}</code> 直接引用。
+                </div>
+            </div>
+
+            <div style="max-height: 420px; overflow-y: auto;">
+                <table class="pm-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th style="width: 200px;">变量名 (Variable Name)</th>
+                            <th>当前变量值 (Value)</th>
+                            <th style="width: 150px; text-align: center;">快捷引用语法</th>
+                            <th style="width: 50px; text-align: center;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-if="envVariablesList.length === 0">
+                            <td colspan="4" style="text-align: center; color: #94a3b8; padding: 24px;">
+                                暂无环境变量，点击下方【+ 添加新变量】或在接口后置脚本中调用 <code>pm.environment.set(k, v)</code> 自动存入
+                            </td>
+                        </tr>
+                        <tr v-for="(item, idx) in envVariablesList" :key="idx">
+                            <td>
+                                <el-input v-model="item.key" placeholder="例如: JWT_TOKEN" size="small"></el-input>
+                            </td>
+                            <td>
+                                <el-input v-model="item.value" placeholder="变量当前值" size="small"></el-input>
+                            </td>
+                            <td style="text-align: center;">
+                                <el-tooltip content="点击一键复制变量引用语法" placement="top">
+                                    <el-button size="small" type="primary" link @click="copyEnvVarRef(item.key)" :disabled="!item.key">
+                                        <i class="fa-regular fa-copy" style="margin-right: 2px;"></i>
+                                        <code>{{ getVarRef(item.key) }}</code>
+                                    </el-button>
+                                </el-tooltip>
+                            </td>
+                            <td style="text-align: center;">
+                                <el-button size="small" link type="danger" @click="removeEnvVarRow(idx)">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </el-button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <el-button size="small" type="primary" plain @click="addEnvVarRow">
+                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加新变量
+                </el-button>
+                <span style="font-size: 11.5px; color: #64748b;">当前共 {{ envVariablesList.length }} 个环境变量</span>
+            </div>
+
+            <template #footer>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <div style="font-size: 11.5px; color: #94a3b8;">
+                        提示：点击保存后将即时同步持久化至后端 SQLite 数据库
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <el-button @click="envVarsDialogVisible = false">取消</el-button>
+                        <el-button type="primary" @click="saveEnvVariables" :loading="envVariablesSaving">
+                            保存修改
                         </el-button>
                     </div>
                 </div>

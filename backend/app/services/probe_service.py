@@ -10,7 +10,7 @@ import httpx
 from jsonschema import Draft7Validator
 from sqlmodel import Session, select
 from app.models import (
-    MachineNode, ApiProbe, MachineProbeHistory, ApiProbeHistory,
+    Environment, ServiceGroup, MachineNode, ApiProbe, MachineProbeHistory, ApiProbeHistory,
     MonitorTarget, ProbeHistory
 )
 from app.database import engine
@@ -405,6 +405,11 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         if not machine:
             raise ValueError(f"MachineNode {api.machine_id} not found for ApiProbe {api_probe_id}")
 
+        grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
+        env = session.get(Environment, grp.environment_id) if grp and grp.environment_id else None
+        env_id = env.id if env else None
+        env_variables = dict(env.variables or {}) if env and env.variables else {}
+
         machine_status = machine.current_status
         machine_host = machine.host
         machine_port = machine.port
@@ -490,13 +495,14 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         rendered_path = "/" + rendered_path
 
     # 执行【前置操作 (Pre-request Actions)】：动态变量、请求头注入、参数注入及前置脚本
-    final_headers, final_params, final_body, final_path, variables = execute_pre_actions(
+    final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
         pre_actions=api_pre_actions,
         headers=req_headers,
         params=req_params,
         body=rendered_body,
         path=rendered_path,
-        auth_token=auth_token
+        auth_token=auth_token,
+        environment_variables=env_variables
     )
 
     if not final_path.startswith("/"):
@@ -538,15 +544,33 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
 
     # 执行【后置操作 (Post-response Actions / Assertions)】
-    all_assertions_passed, assertions_result, extracted_vars = execute_post_actions(
+    all_assertions_passed, assertions_result, extracted_vars, post_updated_env = execute_post_actions(
         post_actions=api_post_actions,
         status_code=http_code,
         latency_ms=http_ms,
         response_headers=resp_headers,
         response_data=json_data,
         response_text=resp_text,
-        context_variables=variables
+        context_variables=variables,
+        environment_variables=env_variables
     )
+
+    # 持久化同步环境变量到 Environment 表
+    all_updated_env = {}
+    all_updated_env.update(pre_updated_env)
+    all_updated_env.update(post_updated_env)
+    if all_updated_env and env_id:
+        try:
+            with Session(engine) as session:
+                env_record = session.get(Environment, env_id)
+                if env_record:
+                    curr_vars = dict(env_record.variables or {})
+                    curr_vars.update(all_updated_env)
+                    env_record.variables = curr_vars
+                    session.add(env_record)
+                    session.commit()
+        except Exception as env_err:
+            print(f"[Warn] 探针持久化更新环境变量失败: {env_err}")
 
     is_healthy = bool(http_ok and (http_code == 200) and schema_matched and all_assertions_passed)
 

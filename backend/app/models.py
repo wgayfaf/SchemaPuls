@@ -16,7 +16,9 @@ class Environment(SQLModel, table=True):
     description: Optional[str] = Field(default=None, max_length=255)
     base_url: Optional[str] = Field(default=None, max_length=255) # 环境默认前置服务 URL (如 https://api.example.com)
     order_num: int = Field(default=0)
+    variables: Dict[str, Any] = Field(default={}, sa_column=Column(JSON)) # 环境变量池 (如 token, auth_token, 接口链式提取变量)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
 
 
 class ServiceGroup(SQLModel, table=True):
