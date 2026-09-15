@@ -1094,6 +1094,168 @@ const app = createApp({
             apiBodyText.value = (apiBodyText.value || "") + snippet;
         };
 
+        // JSON 格式化核心解析器 (容错支持未加引号的模板宏)
+        const safeFormatJson = (rawStr) => {
+            if (!rawStr || !rawStr.trim()) return "";
+            const trimmed = rawStr.trim();
+            try {
+                const obj = JSON.parse(trimmed);
+                return JSON.stringify(obj, null, 2);
+            } catch (e1) {
+                const macroTokens = [];
+                const masked = trimmed.replace(/(?<!")(\{\{[\w$().,-]+\}\})(?!")/g, (match) => {
+                    const placeholder = `"__SP_MACRO_${macroTokens.length}__"`;
+                    macroTokens.push(match);
+                    return placeholder;
+                });
+                try {
+                    const obj = JSON.parse(masked);
+                    let formatted = JSON.stringify(obj, null, 2);
+                    macroTokens.forEach((original, idx) => {
+                        formatted = formatted.replace(`"__SP_MACRO_${idx}__"`, original);
+                    });
+                    return formatted;
+                } catch (e2) {
+                    throw e1;
+                }
+            }
+        };
+
+        const safeMinifyJson = (rawStr) => {
+            if (!rawStr || !rawStr.trim()) return "";
+            const trimmed = rawStr.trim();
+            try {
+                const obj = JSON.parse(trimmed);
+                return JSON.stringify(obj);
+            } catch (e1) {
+                const macroTokens = [];
+                const masked = trimmed.replace(/(?<!")(\{\{[\w$().,-]+\}\})(?!")/g, (match) => {
+                    const placeholder = `"__SP_MACRO_${macroTokens.length}__"`;
+                    macroTokens.push(match);
+                    return placeholder;
+                });
+                try {
+                    const obj = JSON.parse(masked);
+                    let minified = JSON.stringify(obj);
+                    macroTokens.forEach((original, idx) => {
+                        minified = minified.replace(`"__SP_MACRO_${idx}__"`, original);
+                    });
+                    return minified;
+                } catch (e2) {
+                    throw e1;
+                }
+            }
+        };
+
+        const formatBodyJson = () => {
+            if (!apiBodyText.value || !apiBodyText.value.trim()) {
+                ElementPlus.ElMessage.warning("当前 Body 请求体为空，无需格式化");
+                return;
+            }
+            try {
+                apiBodyText.value = safeFormatJson(apiBodyText.value);
+                ElementPlus.ElMessage.success("Body JSON 格式化完成！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("JSON 格式错误: " + (err.message || "无法解析有效 JSON"));
+            }
+        };
+
+        const minifyBodyJson = () => {
+            if (!apiBodyText.value || !apiBodyText.value.trim()) {
+                ElementPlus.ElMessage.warning("当前 Body 请求体为空");
+                return;
+            }
+            try {
+                apiBodyText.value = safeMinifyJson(apiBodyText.value);
+                ElementPlus.ElMessage.success("Body JSON 已压缩为紧凑单行格式！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("JSON 格式错误: " + (err.message || "无法解析有效 JSON"));
+            }
+        };
+
+        const clearBodyJson = () => {
+            apiBodyText.value = "";
+            ElementPlus.ElMessage.info("已清空 Body 内容");
+        };
+
+        const formatSchemaJson = () => {
+            if (!apiForm.value.schema_text || !apiForm.value.schema_text.trim()) {
+                ElementPlus.ElMessage.warning("当前 Schema 内容为空，无需格式化");
+                return;
+            }
+            try {
+                apiForm.value.schema_text = safeFormatJson(apiForm.value.schema_text);
+                ElementPlus.ElMessage.success("Schema 契约规则格式化完成！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("Schema 格式错误: " + (err.message || "无法解析有效 JSON"));
+            }
+        };
+
+        const formatSampleJson = () => {
+            if (!apiSampleJson.value || !apiSampleJson.value.trim()) {
+                ElementPlus.ElMessage.warning("样本 JSON 内容为空，无需格式化");
+                return;
+            }
+            try {
+                apiSampleJson.value = safeFormatJson(apiSampleJson.value);
+                ElementPlus.ElMessage.success("样本 JSON 格式化完成！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("样本 JSON 格式错误: " + (err.message || "无法解析有效 JSON"));
+            }
+        };
+
+        const copyResponseBody = async () => {
+            if (!apiTestResult.value || !apiTestResult.value.response_data) {
+                ElementPlus.ElMessage.warning("当前无有效响应数据可复制");
+                return;
+            }
+            try {
+                const text = JSON.stringify(apiTestResult.value.response_data, null, 2);
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                }
+                ElementPlus.ElMessage.success("响应 JSON 已成功复制到剪贴板！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("复制失败: " + err.message);
+            }
+        };
+
+        const formatIfJson = (str) => {
+            if (!str) return "";
+            try {
+                const parsed = JSON.parse(str);
+                return JSON.stringify(parsed, null, 2);
+            } catch {
+                return str;
+            }
+        };
+
+        const copyText = async (text) => {
+            if (!text) return;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                }
+                ElementPlus.ElMessage.success("已复制到剪贴板！");
+            } catch (err) {
+                ElementPlus.ElMessage.error("复制失败: " + err.message);
+            }
+        };
+
         const openCreateApiDialog = (defaultMachineId = null) => {
             editingApiId.value = null;
             let mId = defaultMachineId;
@@ -1201,6 +1363,61 @@ const app = createApp({
                     value: "{{$randomInt(1000, 9999)}}",
                     description: "防缓存随机参数"
                 });
+            } else if (preset === 'js_script') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "javascript",
+                    key: "",
+                    value: "// Postman 风格 JavaScript 预请求脚本\npm.variables.set('token', 'TOKEN_' + Date.now());\npm.request.headers.add({ key: 'X-Sign', value: 'SIGN_' + Math.random().toString(36).substring(7) });\npm.variables.set('auth_b64', btoa('user:pass'));",
+                    description: "Postman JS 动态脚本"
+                });
+            } else if (preset === 'js_rsa') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "javascript",
+                    key: "",
+                    value: `// 引入内置 jsrsasign 密码学库
+const jsrsasign = require('jsrsasign');
+
+// 1. 设置 RSA 公钥 PEM (支持带或不带换行符)
+let publicKeyPEM = '-----BEGIN PUBLIC KEY-----' + 'YOUR_BASE64_PUBLIC_KEY' + '-----END PUBLIC KEY-----';
+const plainPassword = 'my_password_123';
+
+// 2. 获取公钥对象并执行 RSA 加密
+const pubKeyObj = jsrsasign.KEYUTIL.getKey(publicKeyPEM);
+const encryptedHex = jsrsasign.KJUR.crypto.Cipher.encrypt(plainPassword, pubKeyObj);
+
+// 3. 十六进制转 Base64 (支持内置 Buffer 或 btoa)
+function hexToBase64(hex) {
+    if (typeof Buffer !== 'undefined') return Buffer.from(hex, 'hex').toString('base64');
+    var bin = '';
+    for (var i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+    return btoa(bin);
+}
+const encryptedBase64 = hexToBase64(encryptedHex);
+
+// 4. 保存为环境变量，可在 Body 中通过 {{ENCRYPTED_PASSWORD}} 引用
+pm.environment.set('ENCRYPTED_PASSWORD', encryptedBase64);
+console.log('RSA 加密完成，密文长度:', encryptedBase64.length);`,
+                    description: "jsrsasign RSA 公钥加密密码"
+                });
+            } else if (preset === 'js_crypto') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "javascript",
+                    key: "",
+                    value: `// 引入内置 crypto-js 库
+const CryptoJS = require('crypto-js');
+
+// 计算 MD5 与 SHA256 哈希
+const md5Hash = CryptoJS.MD5('plainText_' + Date.now()).toString();
+const sha256Hash = CryptoJS.SHA256('SchemaPulseSecretKey').toString();
+
+pm.variables.set('md5_sign', md5Hash);
+pm.variables.set('sha256_sign', sha256Hash);
+console.log('CryptoJS 签名计算完成:', md5Hash);`,
+                    description: "CryptoJS MD5/SHA256 哈希"
+                });
             } else if (preset === 'script') {
                 apiPreActionsList.value.push({
                     enabled: true,
@@ -1260,6 +1477,12 @@ const app = createApp({
                 item.expression = item.expression || "data.id";
                 item.operator = "extract";
                 item.target_value = "targetId";
+            } else if (item.type === 'javascript') {
+                item.name = item.name || "Postman JS 脚本断言";
+                item.expression = "";
+                item.value = item.value || "pm.test('Status is 200', function() {\n    pm.response.to.have.status(200);\n});\nvar json = pm.response.json();\npm.test('Code is 200', function() {\n    pm.expect(json.code).to.equal(200);\n});";
+                item.operator = "pm.test";
+                item.target_value = "";
             }
         };
 
@@ -1317,6 +1540,16 @@ const app = createApp({
                     expression: "data.token",
                     operator: "extract",
                     target_value: "authToken"
+                });
+            } else if (preset === 'js_test') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "Postman JS 脚本测试断言",
+                    type: "javascript",
+                    value: "pm.test('状态码等于 200', function() {\n    pm.response.to.have.status(200);\n});\nvar json = pm.response.json();\npm.test('响应业务码为 200', function() {\n    pm.expect(json.code).to.equal(200);\n});\npm.environment.set('user_id', json.data ? json.data.id : null);",
+                    operator: "pm.test",
+                    target_value: "",
+                    description: "Postman Tests JS 断言脚本"
                 });
             }
             ElementPlus.ElMessage.success("已添加后置断言预设！");
@@ -1581,7 +1814,7 @@ const app = createApp({
                 http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
                 auth_type: apiAuthType.value,
                 auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
-                pre_actions: apiPreActionsList.value.filter(a => a.key || a.value || a.type === 'custom_script'),
+                pre_actions: apiPreActionsList.value.filter(a => a.key || a.value || a.type === 'custom_script' || a.type === 'javascript'),
                 post_actions: apiPostActionsList.value.filter(a => a.type)
             };
 
@@ -2256,6 +2489,14 @@ const app = createApp({
             removeHeaderRow,
             applyHeaderPreset,
             insertMacroToBody,
+            formatBodyJson,
+            minifyBodyJson,
+            clearBodyJson,
+            formatSchemaJson,
+            formatSampleJson,
+            copyResponseBody,
+            formatIfJson,
+            copyText,
             handleTestRunApi,
             inferSchemaFromTestResult,
             // 前置操作与后置操作导出

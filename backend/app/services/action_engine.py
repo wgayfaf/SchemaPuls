@@ -1,3 +1,4 @@
+import os
 import re
 import time
 import uuid
@@ -5,6 +6,40 @@ import random
 import json
 from typing import Dict, Any, List, Optional, Tuple, Union
 from app.services.template_engine import render_macro_string
+
+JS_LIBS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "js_libs")
+_CACHED_JSRSASIGN: Optional[str] = None
+_CACHED_CRYPTOJS: Optional[str] = None
+
+
+def get_jsrsasign_code() -> str:
+    global _CACHED_JSRSASIGN
+    if _CACHED_JSRSASIGN is None:
+        p = os.path.join(JS_LIBS_DIR, "jsrsasign.min.js")
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    _CACHED_JSRSASIGN = f.read()
+            except Exception:
+                _CACHED_JSRSASIGN = ""
+        else:
+            _CACHED_JSRSASIGN = ""
+    return _CACHED_JSRSASIGN
+
+
+def get_cryptojs_code() -> str:
+    global _CACHED_CRYPTOJS
+    if _CACHED_CRYPTOJS is None:
+        p = os.path.join(JS_LIBS_DIR, "crypto-js.min.js")
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    _CACHED_CRYPTOJS = f.read()
+            except Exception:
+                _CACHED_CRYPTOJS = ""
+        else:
+            _CACHED_CRYPTOJS = ""
+    return _CACHED_CRYPTOJS
 
 
 def get_nested_value(data: Any, path: str) -> Tuple[bool, Any]:
@@ -60,6 +95,393 @@ def render_with_variables(text_val: Optional[str], variables: Dict[str, Any], au
     return result
 
 
+def setup_quickjs_runtime(ctx: Any, script_code: str):
+    """
+    为 QuickJS 沙箱注入标准环境 polyfill（btoa, atob, Buffer, require）
+    并在脚本需要时动态装载 jsrsasign (含 KEYUTIL, KJUR, CryptoJS, ASN1HEX, X509) 与 crypto-js
+    """
+    base_js = """
+    var window = globalThis;
+    var navigator = { userAgent: "SchemaPulse/QuickJS" };
+    var _b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    function btoa(input) {
+        var str = String(input);
+        var output = '';
+        for (var block = 0, charCode, i = 0, map = _b64chars;
+             str.charAt(i | 0) || (map = '=', i % 1);
+             output += map.charAt(63 & block >> 8 - i % 1 * 8)) {
+            charCode = str.charCodeAt(i += 3/4);
+            if (charCode > 0xFF) {
+                throw new Error("'btoa' failed: The string to be encoded contains characters outside of the Latin1 range.");
+            }
+            block = block << 8 | charCode;
+        }
+        return output;
+    }
+    function atob(input) {
+        var str = String(input).replace(/[=]+$/, '');
+        var output = '';
+        for (var bc = 0, bs = 0, buffer, i = 0;
+             buffer = str.charAt(i++);
+             ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer,
+               bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0
+        ) {
+            buffer = _b64chars.indexOf(buffer);
+        }
+        return output;
+    }
+
+    var Buffer = {
+        from: function(data, enc) {
+            var bytes;
+            if (data instanceof Uint8Array || Array.isArray(data)) {
+                bytes = data;
+            } else if (typeof data === 'string') {
+                if (enc === 'hex') {
+                    bytes = [];
+                    for (var i = 0; i < data.length; i += 2) bytes.push(parseInt(data.substr(i, 2), 16));
+                } else if (enc === 'base64') {
+                    var bin = atob(data);
+                    bytes = [];
+                    for (var i = 0; i < bin.length; i++) bytes.push(bin.charCodeAt(i));
+                } else {
+                    bytes = [];
+                    for (var i = 0; i < data.length; i++) bytes.push(data.charCodeAt(i));
+                }
+            } else {
+                bytes = [];
+            }
+            return {
+                toString: function(outEnc) {
+                    if (outEnc === 'base64') {
+                        var bin = '';
+                        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+                        return btoa(bin);
+                    }
+                    if (outEnc === 'hex') {
+                        var hex = '';
+                        for (var i = 0; i < bytes.length; i++) {
+                            var h = (bytes[i] & 0xFF).toString(16);
+                            hex += (h.length === 1 ? '0' : '') + h;
+                        }
+                        return hex;
+                    }
+                    var s = '';
+                    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+                    return s;
+                }
+            };
+        }
+    };
+    """
+    ctx.eval(base_js)
+
+    # 检查是否需要密码学库
+    needs_jsrsasign = any(k in script_code for k in ["jsrsasign", "KEYUTIL", "KJUR", "ASN1HEX", "X509"])
+    needs_cryptojs = any(k in script_code for k in ["crypto-js", "CryptoJS", "crypto"])
+
+    if needs_jsrsasign:
+        code = get_jsrsasign_code()
+        if code:
+            ctx.eval(code)
+    elif needs_cryptojs:
+        code = get_cryptojs_code()
+        if code:
+            ctx.eval(code)
+
+    wire_require_js = """
+    var jsrsasignObj = (typeof globalThis.KEYUTIL !== 'undefined') ? {
+        KEYUTIL: globalThis.KEYUTIL,
+        KJUR: globalThis.KJUR,
+        CryptoJS: globalThis.CryptoJS || {},
+        ASN1HEX: globalThis.ASN1HEX || {},
+        X509: globalThis.X509 || {}
+    } : null;
+
+    if (jsrsasignObj) {
+        globalThis.jsrsasign = jsrsasignObj;
+    }
+
+    function require(moduleName) {
+        var name = String(moduleName).toLowerCase().trim();
+        if (name === 'jsrsasign') {
+            if (jsrsasignObj) return jsrsasignObj;
+            if (globalThis.jsrsasign) return globalThis.jsrsasign;
+            throw new Error("Cannot find module 'jsrsasign'. 请确认内置 jsrsasign 库已就绪");
+        }
+        if (name === 'crypto-js') {
+            if (globalThis.CryptoJS) return globalThis.CryptoJS;
+            throw new Error("Cannot find module 'crypto-js'");
+        }
+        if (name === 'buffer') {
+            return { Buffer: globalThis.Buffer || Buffer };
+        }
+        throw new Error("Cannot find module '" + moduleName + "'. 内置支持模块: ['jsrsasign', 'crypto-js', 'buffer']");
+    }
+    """
+    ctx.eval(wire_require_js)
+
+
+def run_quickjs_pre_script(
+    script_code: str,
+    variables: Dict[str, Any],
+    headers: Dict[str, str],
+    params: Dict[str, str],
+    path: str,
+    body: Optional[str]
+) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, str], str, Optional[str], Optional[str]]:
+    """
+    使用 QuickJS 执行 Postman 风格 JavaScript 预请求脚本 (ES2020+)
+    返回: (variables, headers, params, path, body, error_message)
+    """
+    try:
+        import quickjs
+    except ImportError:
+        return variables, headers, params, path, body, "QuickJS 运行时未安装，请执行 pip install quickjs"
+
+    try:
+        ctx = quickjs.Context()
+        ctx.set_time_limit(2.0)  # 2秒超时保护
+        ctx.set_memory_limit(30 * 1024 * 1024)  # 30MB 内存保护
+
+        # 注入标准 Polyfill 及 require、jsrsasign、crypto-js 支持
+        setup_quickjs_runtime(ctx, script_code)
+
+        setup_js = f"""
+        var variables = {json.dumps(variables, ensure_ascii=False)};
+        var headers = {json.dumps(headers, ensure_ascii=False)};
+        var params = {json.dumps(params, ensure_ascii=False)};
+        var request = {{
+            path: {json.dumps(path, ensure_ascii=False)},
+            body: {json.dumps(body, ensure_ascii=False)}
+        }};
+        var _console_logs = [];
+        var console = {{
+            log: function() {{ _console_logs.push(Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            warn: function() {{ _console_logs.push('[WARN] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            error: function() {{ _console_logs.push('[ERROR] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            info: function() {{ _console_logs.push('[INFO] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }}
+        }};
+        var pm = {{
+            variables: {{
+                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                get: function(k) {{ return variables[String(k)]; }}
+            }},
+            environment: {{
+                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                get: function(k) {{ return variables[String(k)]; }}
+            }},
+            globals: {{
+                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                get: function(k) {{ return variables[String(k)]; }}
+            }},
+            collectionVariables: {{
+                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                get: function(k) {{ return variables[String(k)]; }}
+            }},
+            request: {{
+                headers: {{
+                    add: function(obj) {{
+                        if (typeof obj === 'string') {{
+                            var p = obj.indexOf(':');
+                            if (p > -1) headers[obj.substring(0, p).trim()] = obj.substring(p + 1).trim();
+                        }} else if (obj && obj.key) {{
+                            headers[String(obj.key)] = (obj.value !== undefined && obj.value !== null) ? String(obj.value) : "";
+                        }}
+                    }},
+                    upsert: function(obj) {{
+                        if (obj && obj.key) {{
+                            headers[String(obj.key)] = (obj.value !== undefined && obj.value !== null) ? String(obj.value) : "";
+                        }}
+                    }},
+                    get: function(k) {{ return headers[String(k)]; }},
+                    remove: function(k) {{ delete headers[String(k)]; }}
+                }},
+                addHeader: function(strOrObj) {{
+                    if (typeof strOrObj === 'string') {{
+                        var p = strOrObj.indexOf(':');
+                        if (p > -1) headers[strOrObj.substring(0, p).trim()] = strOrObj.substring(p + 1).trim();
+                    }} else if (strOrObj && strOrObj.key) {{
+                        headers[String(strOrObj.key)] = (strOrObj.value !== undefined && strOrObj.value !== null) ? String(strOrObj.value) : "";
+                    }}
+                }},
+                url: {{
+                    query: {{
+                        add: function(strOrObj) {{
+                            if (typeof strOrObj === 'string') {{
+                                var p = strOrObj.indexOf('=');
+                                if (p > -1) params[strOrObj.substring(0, p).trim()] = strOrObj.substring(p + 1).trim();
+                            }} else if (strOrObj && strOrObj.key) {{
+                                params[String(strOrObj.key)] = (strOrObj.value !== undefined && strOrObj.value !== null) ? String(strOrObj.value) : "";
+                            }}
+                        }}
+                    }}
+                }},
+                body: {{
+                    get raw() {{ return request.body; }},
+                    set raw(val) {{ request.body = (typeof val === 'string') ? val : JSON.stringify(val); }},
+                    update: function(newBody) {{
+                        request.body = (typeof newBody === 'string') ? newBody : JSON.stringify(newBody);
+                    }}
+                }}
+            }}
+        }};
+        """
+        ctx.eval(setup_js)
+        ctx.eval(script_code)
+
+        result_raw = ctx.eval("JSON.stringify({ variables: variables, headers: headers, params: params, request: request, logs: _console_logs })")
+        res_dict = json.loads(result_raw)
+
+        new_vars = dict(res_dict.get("variables") or {})
+        logs = res_dict.get("logs") or []
+        if logs:
+            new_vars["_console_logs"] = logs
+
+        new_headers = {str(k): str(v) for k, v in (res_dict.get("headers") or {}).items()}
+        new_params = {str(k): str(v) for k, v in (res_dict.get("params") or {}).items()}
+        req_obj = res_dict.get("request") or {}
+        new_path = str(req_obj.get("path") or path)
+        new_body = req_obj.get("body")
+        if new_body is not None and not isinstance(new_body, str):
+            new_body = json.dumps(new_body, ensure_ascii=False)
+        return new_vars, new_headers, new_params, new_path, new_body, None
+    except Exception as e:
+        return variables, headers, params, path, body, str(e)
+
+
+def run_quickjs_post_script(
+    script_code: str,
+    status_code: Optional[int],
+    latency_ms: Optional[float],
+    response_data: Any,
+    response_text: Optional[str],
+    response_headers: Dict[str, str],
+    context_variables: Dict[str, Any]
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Optional[str]]:
+    """
+    使用 QuickJS 执行 Postman Tests 风格 JavaScript 测试脚本 (ES2020+)
+    返回: (assertions_result, extracted_vars, error_message)
+    """
+    try:
+        import quickjs
+    except ImportError:
+        return [], {}, "QuickJS 运行时未安装，请执行 pip install quickjs"
+
+    try:
+        ctx = quickjs.Context()
+        ctx.set_time_limit(2.0)
+        ctx.set_memory_limit(30 * 1024 * 1024)
+
+        # 注入标准 Polyfill 及 require、jsrsasign、crypto-js 支持
+        setup_quickjs_runtime(ctx, script_code)
+
+        setup_js = f"""
+        var status_code = {json.dumps(status_code)};
+        var latency_ms = {json.dumps(latency_ms)};
+        var response_data = {json.dumps(response_data, ensure_ascii=False)};
+        var response_text = {json.dumps(response_text or "", ensure_ascii=False)};
+        var resp_headers = {json.dumps(response_headers, ensure_ascii=False)};
+        var context_variables = {json.dumps(context_variables, ensure_ascii=False)};
+        var extracted_vars = {{}};
+        var assertions = [];
+        var _console_logs = [];
+        var console = {{
+            log: function() {{ _console_logs.push(Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            warn: function() {{ _console_logs.push('[WARN] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            error: function() {{ _console_logs.push('[ERROR] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }},
+            info: function() {{ _console_logs.push('[INFO] ' + Array.prototype.slice.call(arguments).map(String).join(' ')); }}
+        }};
+
+        var pm = {{
+            test: function(name, fn) {{
+                try {{
+                    fn();
+                    assertions.push({{ name: String(name), passed: true, message: "断言校验通过" }});
+                }} catch (e) {{
+                    assertions.push({{ name: String(name), passed: false, message: e.message || String(e) }});
+                }}
+            }},
+            expect: function(actual) {{
+                return {{
+                    to: {{
+                        equal: function(expected) {{
+                            if (actual != expected) throw new Error("期望等于 " + JSON.stringify(expected) + "，但实际为 " + JSON.stringify(actual));
+                        }},
+                        eql: function(expected) {{
+                            if (JSON.stringify(actual) != JSON.stringify(expected)) throw new Error("期望 eql " + JSON.stringify(expected) + "，但实际为 " + JSON.stringify(actual));
+                        }},
+                        have: {{
+                            status: function(expected) {{
+                                if (status_code != expected) throw new Error("期望状态码 " + expected + "，但实际为 " + status_code);
+                            }}
+                        }},
+                        be: {{
+                            above: function(val) {{
+                                if (!(actual > val)) throw new Error("期望大于 " + val + "，但实际为 " + actual);
+                            }},
+                            below: function(val) {{
+                                if (!(actual < val)) throw new Error("期望小于 " + val + "，但实际为 " + actual);
+                            }},
+                            true: function() {{
+                                if (actual !== true) throw new Error("期望为 true，但实际为 " + actual);
+                            }},
+                            false: function() {{
+                                if (actual !== false) throw new Error("期望为 false，但实际为 " + actual);
+                            }}
+                        }},
+                        include: function(item) {{
+                            if (typeof actual === 'string') {{
+                                if (actual.indexOf(item) === -1) throw new Error("期望包含 " + JSON.stringify(item));
+                            }} else if (Array.isArray(actual)) {{
+                                if (actual.indexOf(item) === -1) throw new Error("期望数组包含 " + JSON.stringify(item));
+                            }}
+                        }}
+                    }}
+                }};
+            }},
+            response: {{
+                code: status_code,
+                status: status_code,
+                responseTime: latency_ms,
+                json: function() {{ return response_data; }},
+                text: function() {{ return response_text; }},
+                headers: {{
+                    get: function(k) {{ return resp_headers[String(k).toLowerCase()]; }}
+                }},
+                to: {{
+                    have: {{
+                        status: function(exp) {{
+                            if (status_code != exp) throw new Error("期望状态码 " + exp + "，实际为 " + status_code);
+                        }}
+                    }}
+                }}
+            }},
+            variables: {{
+                set: function(k, v) {{ extracted_vars[String(k)] = v; }},
+                get: function(k) {{ return extracted_vars[String(k)] !== undefined ? extracted_vars[String(k)] : context_variables[String(k)]; }}
+            }},
+            environment: {{
+                set: function(k, v) {{ extracted_vars[String(k)] = v; }},
+                get: function(k) {{ return extracted_vars[String(k)] !== undefined ? extracted_vars[String(k)] : context_variables[String(k)]; }}
+            }}
+        }};
+        """
+        ctx.eval(setup_js)
+        ctx.eval(script_code)
+
+        result_raw = ctx.eval("JSON.stringify({ assertions: assertions, extracted_vars: extracted_vars, logs: _console_logs })")
+        res_dict = json.loads(result_raw)
+        extracted = res_dict.get("extracted_vars", {})
+        logs = res_dict.get("logs") or []
+        if logs:
+            extracted["_console_logs"] = logs
+        return res_dict.get("assertions", []), extracted, None
+    except Exception as e:
+        return [], {}, str(e)
+
+
+
 def execute_pre_actions(
     pre_actions: Optional[List[Dict[str, Any]]],
     headers: Optional[Dict[str, str]] = None,
@@ -104,6 +526,20 @@ def execute_pre_actions(
         elif act_type == "inject_param":
             if key:
                 req_params[key] = val_str
+        elif act_type in ["javascript", "js_script"]:
+            # QuickJS Postman-style JavaScript 预请求脚本执行
+            script_code = action.get("value", "") or action.get("script", "")
+            if script_code and isinstance(script_code, str):
+                variables, req_headers, req_params, req_path, req_body, js_err = run_quickjs_pre_script(
+                    script_code=script_code,
+                    variables=variables,
+                    headers=req_headers,
+                    params=req_params,
+                    path=req_path,
+                    body=req_body
+                )
+                if js_err:
+                    variables["_script_error"] = f"[JS执行异常] {js_err}"
         elif act_type == "custom_script":
             # 简易受限 Python 预请求脚本执行
             script_code = action.get("value", "") or action.get("script", "")
@@ -132,11 +568,17 @@ def execute_pre_actions(
                 except Exception as e:
                     variables["_script_error"] = str(e)
 
-    # 前置变量结算完毕后，对 headers, params, body, path 进行全面二次插值
-    final_headers = {k: render_with_variables(v, variables, auth_token) for k, v in req_headers.items()}
-    final_params = {k: render_with_variables(v, variables, auth_token) for k, v in req_params.items()}
-    final_body = render_with_variables(req_body, variables, auth_token)
-    final_path = render_with_variables(req_path, variables, auth_token)
+    # 前置操作结算完毕后，构造全量上下文插值变量池
+    # 结合: headers + params + variables，确保前置操作注入的任意参数、请求头或临时变量均可直接在 Body JSON 中以 {{key}} 引用
+    combined_ctx: Dict[str, Any] = {}
+    combined_ctx.update(req_headers)
+    combined_ctx.update(req_params)
+    combined_ctx.update(variables)
+
+    final_headers = {k: render_with_variables(v, combined_ctx, auth_token) for k, v in req_headers.items()}
+    final_params = {k: render_with_variables(v, combined_ctx, auth_token) for k, v in req_params.items()}
+    final_body = render_with_variables(req_body, combined_ctx, auth_token)
+    final_path = render_with_variables(req_path, combined_ctx, auth_token)
 
     return final_headers, final_params, final_body, final_path, variables
 
@@ -367,6 +809,42 @@ def execute_post_actions(
                         "operator": "extract",
                         "message": f"未在响应数据或响应头中找到 '{expr}'"
                     })
+
+        # 7. JavaScript Postman Tests 脚本断言
+        elif act_type in ["javascript", "js_script"]:
+            script_code = action.get("value", "") or action.get("expression", "") or action.get("script", "")
+            if script_code and isinstance(script_code, str):
+                js_assertions, js_extracted, js_err = run_quickjs_post_script(
+                    script_code=script_code,
+                    status_code=status_code,
+                    latency_ms=latency_ms,
+                    response_data=response_data,
+                    response_text=raw_text,
+                    response_headers=resp_headers,
+                    context_variables=context_variables or {}
+                )
+                if js_err:
+                    assertions_result.append({
+                        "name": name or "JavaScript 断言脚本执行",
+                        "type": act_type,
+                        "passed": False,
+                        "actual": None,
+                        "expected": "无运行时异常",
+                        "operator": "js_eval",
+                        "message": f"脚本执行错误: {js_err}"
+                    })
+                else:
+                    for ja in js_assertions:
+                        assertions_result.append({
+                            "name": ja.get("name") or "JS 测试断言",
+                            "type": act_type,
+                            "passed": bool(ja.get("passed")),
+                            "actual": None,
+                            "expected": None,
+                            "operator": "pm.test",
+                            "message": ja.get("message", "")
+                        })
+                    extracted_vars.update(js_extracted)
 
     # 判定全部断言是否通过 (忽略 extract_variable)
     pure_assertions = [a for a in assertions_result if a.get("type") != "extract_variable"]
