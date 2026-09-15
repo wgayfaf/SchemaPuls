@@ -1595,45 +1595,83 @@ export SMTP_USE_SSL="true"
                     </table>
                 </el-tab-pane>
 
-                <!-- 2. Headers 标签页 -->
+                <!-- 2. Headers 标签页 (Postman 风格: 系统默认自动填充 + 用户自定义扩展) -->
                 <el-tab-pane label="Headers" name="headers">
-                    <div class="pm-preset-bar">
-                        <span style="font-size: 12px; color: #64748b; font-weight: 600;">快速预设:</span>
-                        <span class="pm-preset-tag" @click="applyHeaderPreset('json')">+ JSON Content-Type</span>
-                        <span class="pm-preset-tag" @click="applyHeaderPreset('accept_json')">+ Accept:
-                            application/json</span>
-                        <span class="pm-preset-tag" @click="applyHeaderPreset('bearer')">+ Bearer Token</span>
-                        <span class="pm-preset-tag" @click="applyHeaderPreset('form')">+ Form Urlencoded</span>
-                        <div style="flex: 1;"></div>
+                    <div class="pm-headers-toolbar">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <el-button size="small" :type="showDefaultHeaders ? 'primary' : 'default'" text class="pm-hidden-headers-btn" @click="showDefaultHeaders = !showDefaultHeaders">
+                                <i :class="showDefaultHeaders ? 'fa-solid fa-eye-slash' : 'fa-regular fa-eye'" style="margin-right: 5px;"></i>
+                                <span v-if="showDefaultHeaders">隐藏系统默认请求头 ({{ activeDefaultHeadersCount }})</span>
+                                <span v-else>{{ activeDefaultHeadersCount }} 个系统默认请求头 (已自动携带)</span>
+                            </el-button>
+                            <span style="font-size: 11px; color: #94a3b8;">
+                                <i class="fa-solid fa-circle-info" style="margin-right: 3px;"></i>发包时系统将自动注入默认请求头，输入同名自定义请求头可直接覆盖
+                            </span>
+                        </div>
                         <el-button size="small" type="primary" plain @click="addHeaderRow">
-                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加请求头
+                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加自定义请求头
                         </el-button>
                     </div>
+
+                    <!-- 默认请求头折叠时的 Postman 风格快捷提醒条 -->
+                    <div v-if="!showDefaultHeaders" class="pm-hidden-headers-tip" @click="showDefaultHeaders = true">
+                        <i class="fa-regular fa-eye" style="margin-right: 6px; color: #2563eb;"></i>
+                        <span>已自动启用 <strong>{{ activeDefaultHeadersCount }}</strong> 个 Postman 规范默认请求头 (User-Agent, Accept, Connection, Content-Type 等)</span>
+                        <span class="pm-tip-link">点击展开查看/修改</span>
+                    </div>
+
                     <table class="pm-kv-table">
                         <thead>
                             <tr>
                                 <th style="width: 45px; text-align: center;">启用</th>
-                                <th style="width: 30%;">请求头键 (Header Key)</th>
-                                <th style="width: 38%;">请求头值 (Header Value)</th>
+                                <th style="width: 32%;">请求头键 (Header Key)</th>
+                                <th style="width: 36%;">请求头值 (Header Value)</th>
                                 <th>说明 (Description)</th>
                                 <th style="width: 50px; text-align: center;">操作</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="(item, idx) in apiHeadersList" :key="idx">
+                            <!-- Postman 系统默认请求头列表 (可取消勾选/同名自动覆盖/动态调整) -->
+                            <tr v-if="showDefaultHeaders" v-for="(item, idx) in systemDefaultHeaders" :key="'sys_' + idx"
+                                class="pm-header-row-sys" :class="{ 'pm-header-overridden': isHeaderOverridden(item.key) }">
+                                <td style="text-align: center;">
+                                    <el-checkbox v-model="item.enabled" :disabled="isHeaderOverridden(item.key)"></el-checkbox>
+                                </td>
+                                <td>
+                                    <span :style="isHeaderOverridden(item.key) ? 'text-decoration: line-through; opacity: 0.6;' : 'font-weight: 600; color: #334155; font-family: monospace; font-size: 12.5px;'">
+                                        {{ item.key }}
+                                    </span>
+                                    <span class="pm-auto-tag">自动生成</span>
+                                    <el-tag v-if="isHeaderOverridden(item.key)" size="small" type="warning" effect="plain" class="pm-override-tag">
+                                        <i class="fa-solid fa-arrow-down" style="margin-right: 3px;"></i>已被自定义覆盖
+                                    </el-tag>
+                                </td>
+                                <td>
+                                    <span :style="isHeaderOverridden(item.key) ? 'text-decoration: line-through; opacity: 0.6;' : 'color: #0f172a; font-family: monospace; font-size: 12.5px;'">
+                                        {{ item.value }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span style="font-size: 12px; color: #64748b;">{{ item.description }}</span>
+                                </td>
+                                <td style="text-align: center;">
+                                    <i class="fa-solid fa-lock" style="color: #94a3b8; font-size: 12px;" title="系统默认预填请求头"></i>
+                                </td>
+                            </tr>
+
+                            <!-- 用户自定义请求头列表 -->
+                            <tr v-for="(item, idx) in apiHeadersList" :key="'custom_' + idx">
                                 <td style="text-align: center;">
                                     <el-checkbox v-model="item.enabled"></el-checkbox>
                                 </td>
                                 <td>
-                                    <el-input v-model="item.key" placeholder="如 Content-Type / X-App-Id"
-                                        size="small"></el-input>
+                                    <el-input v-model="item.key" placeholder="如 Authorization / X-Custom-Header" size="small"></el-input>
                                 </td>
                                 <td>
-                                    <el-input v-model="item.value" placeholder="如 application/json"
-                                        size="small"></el-input>
+                                    <el-input v-model="item.value" placeholder="请求头内容或变量引用" size="small"></el-input>
                                 </td>
                                 <td>
-                                    <el-input v-model="item.description" placeholder="说明" size="small"></el-input>
+                                    <el-input v-model="item.description" placeholder="用途说明" size="small"></el-input>
                                 </td>
                                 <td style="text-align: center;">
                                     <span class="pm-kv-action-btn" title="删除此行" @click="removeHeaderRow(idx)">

@@ -756,6 +756,86 @@
             background: #eff6ff;
         }
 
+        /* Postman Headers 风格组件 */
+        .pm-headers-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .pm-hidden-headers-btn {
+            font-size: 12px !important;
+            color: #64748b !important;
+            padding: 4px 8px !important;
+            border-radius: 4px !important;
+            background: #f1f5f9 !important;
+            transition: all 0.2s ease;
+        }
+
+        .pm-hidden-headers-btn:hover {
+            color: #2563eb !important;
+            background: #e2e8f0 !important;
+        }
+
+        .pm-hidden-headers-tip {
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #64748b;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: all 0.15s ease;
+        }
+
+        .pm-hidden-headers-tip:hover {
+            background: #f1f5f9;
+            border-color: #94a3b8;
+            color: #1e293b;
+        }
+
+        .pm-tip-link {
+            color: #2563eb;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+
+        .pm-auto-tag {
+            font-size: 10px;
+            background: #e2e8f0;
+            color: #475569;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-left: 6px;
+            font-weight: 500;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .pm-override-tag {
+            font-size: 10px !important;
+            height: 18px !important;
+            line-height: 16px !important;
+            padding: 0 5px !important;
+            margin-left: 6px !important;
+            vertical-align: middle;
+        }
+
+        .pm-header-row-sys td {
+            background: #f8fafc !important;
+        }
+
+        .pm-header-overridden td {
+            background: #fafafa !important;
+            opacity: 0.6;
+        }
+
         /* Monospace Textarea */
         .pm-code-box .el-textarea__inner {
             font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace !important;

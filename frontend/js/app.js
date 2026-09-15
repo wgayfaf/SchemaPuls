@@ -117,8 +117,22 @@ const app = createApp({
         const apiParamsList = ref([
             { enabled: true, key: "", value: "", description: "" }
         ]);
+        // Postman 风格系统默认自动生成请求头
+        const createDefaultHeaders = () => [
+            { enabled: true, key: "User-Agent", value: "SchemaPulse/2.0 (PostmanRuntime)", description: "客户端探针引擎标识", isSystem: true, isCalculated: false },
+            { enabled: true, key: "Accept", value: "*/*", description: "默认允许接收所有响应类型", isSystem: true, isCalculated: false },
+            { enabled: true, key: "Accept-Encoding", value: "gzip, deflate, br", description: "客户端支持的压缩算法", isSystem: true, isCalculated: false },
+            { enabled: true, key: "Connection", value: "keep-alive", description: "保持 HTTP 长连接", isSystem: true, isCalculated: false },
+            { enabled: true, key: "Host", value: "<根据请求目标地址自动解析>", description: "根据目标地址动态解析主机名", isSystem: true, isCalculated: true },
+            { enabled: true, key: "Content-Type", value: "application/json", description: "根据请求体格式自动配置", isSystem: true, isCalculated: false, isDynamicType: true },
+            { enabled: true, key: "Content-Length", value: "<根据请求体大小自动计算>", description: "根据请求体实际长度动态填充", isSystem: true, isCalculated: true }
+        ];
+
+        const systemDefaultHeaders = ref(createDefaultHeaders());
+        const showDefaultHeaders = ref(true); // 默认展示 Postman 预填请求头
+
         const apiHeadersList = ref([
-            { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
+            { enabled: true, key: "", value: "", description: "" }
         ]);
         const apiBodyType = ref("none"); // 'none' | 'json' | 'form'
         const apiBodyText = ref("");
@@ -1181,40 +1195,73 @@ const app = createApp({
             }
         };
 
-        const applyHeaderPreset = (preset) => {
-            if (preset === 'json') {
-                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'content-type');
-                if (existing) {
-                    existing.value = 'application/json';
-                    existing.enabled = true;
-                } else {
-                    apiHeadersList.value.push({ enabled: true, key: 'Content-Type', value: 'application/json', description: 'JSON 数据类型' });
+        // 判断指定 Key 是否已被用户自定义请求头覆盖 (不区分大小写)
+        const isHeaderOverridden = (key) => {
+            if (!key) return false;
+            const lowerKey = key.trim().toLowerCase();
+            return apiHeadersList.value.some(h => 
+                h.enabled && h.key && h.key.trim().toLowerCase() === lowerKey
+            );
+        };
+
+        // 计算当前生效且未被覆盖的系统默认请求头数量
+        const activeDefaultHeadersCount = computed(() => {
+            return systemDefaultHeaders.value.filter(h => h.enabled && !isHeaderOverridden(h.key)).length;
+        });
+
+        // 组装最终真实发包的有效请求头集合 (自定义请求头优先并覆盖同名系统默认)
+        const getEffectiveHeaders = () => {
+            const result = [];
+            const lowerCustomKeys = new Set();
+
+            // 1. 优先加入用户自定义且启用的有效请求头
+            apiHeadersList.value.forEach(h => {
+                if (h.enabled && h.key && h.key.trim()) {
+                    result.push({
+                        enabled: true,
+                        key: h.key.trim(),
+                        value: h.value !== undefined && h.value !== null ? String(h.value) : "",
+                        description: h.description || ""
+                    });
+                    lowerCustomKeys.add(h.key.trim().toLowerCase());
                 }
-            } else if (preset === 'bearer') {
-                apiActiveTab.value = 'auth';
-                apiAuthType.value = 'bearer';
-                if (!apiAuthConfig.value.token) {
-                    apiAuthConfig.value.token = '{{TOKEN}}';
+            });
+
+            // 2. 补充分配未被覆盖、启用的系统默认请求头 (排除纯界面占位标记 isCalculated)
+            systemDefaultHeaders.value.forEach(h => {
+                if (h.enabled && !lowerCustomKeys.has(h.key.trim().toLowerCase())) {
+                    if (!h.isCalculated) {
+                        result.push({
+                            enabled: true,
+                            key: h.key.trim(),
+                            value: h.value !== undefined && h.value !== null ? String(h.value) : "",
+                            description: h.description || ""
+                        });
+                    }
                 }
-            } else if (preset === 'accept_json') {
-                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'accept');
-                if (existing) {
-                    existing.value = 'application/json';
-                    existing.enabled = true;
+            });
+
+            return result;
+        };
+
+        // 监听 Body 类型变动，自动同步系统默认 Content-Type
+        watch(apiBodyType, (newType) => {
+            const ct = systemDefaultHeaders.value.find(h => h.key.toLowerCase() === 'content-type');
+            if (ct) {
+                if (newType === 'json') {
+                    ct.enabled = true;
+                    ct.value = 'application/json';
+                    ct.description = '根据 Body 格式自动设置 (JSON 数据类型)';
+                } else if (newType === 'form') {
+                    ct.enabled = true;
+                    ct.value = 'application/x-www-form-urlencoded';
+                    ct.description = '根据 Body 格式自动设置 (表单数据)';
                 } else {
-                    apiHeadersList.value.push({ enabled: true, key: 'Accept', value: 'application/json', description: '期望接收 JSON' });
-                }
-            } else if (preset === 'form') {
-                const existing = apiHeadersList.value.find(h => h.key.toLowerCase() === 'content-type');
-                if (existing) {
-                    existing.value = 'application/x-www-form-urlencoded';
-                    existing.enabled = true;
-                } else {
-                    apiHeadersList.value.push({ enabled: true, key: 'Content-Type', value: 'application/x-www-form-urlencoded', description: '表单数据' });
+                    ct.enabled = false;
+                    ct.description = '无需请求体 (Body 为 none)';
                 }
             }
-            ElementPlus.ElMessage.success("已应用预设");
-        };
+        });
 
         const insertMacroToBody = (macroType) => {
             let snippet = "";
@@ -1438,8 +1485,10 @@ const app = createApp({
             apiParamsList.value = [
                 { enabled: true, key: "", value: "", description: "" }
             ];
+            systemDefaultHeaders.value = createDefaultHeaders();
+            showDefaultHeaders.value = true;
             apiHeadersList.value = [
-                { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
+                { enabled: true, key: "", value: "", description: "" }
             ];
             apiBodyType.value = "none";
             apiBodyText.value = "";
@@ -1745,19 +1794,32 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                 apiParamsList.value = [{ enabled: true, key: "", value: "", description: "" }];
             }
 
-            // 恢复 Headers
+            // 恢复 Headers (分离系统默认请求头与用户自定义请求头)
+            systemDefaultHeaders.value = createDefaultHeaders();
+            showDefaultHeaders.value = true;
+            const customHeaders = [];
             if (row.http_headers && Array.isArray(row.http_headers) && row.http_headers.length > 0) {
-                apiHeadersList.value = row.http_headers.map(h => ({
-                    enabled: h.enabled !== false,
-                    key: h.key || "",
-                    value: h.value || "",
-                    description: h.description || ""
-                }));
-            } else {
-                apiHeadersList.value = [
-                    { enabled: true, key: "Accept", value: "application/json", description: "接收响应格式" }
-                ];
+                row.http_headers.forEach(h => {
+                    const k = (h.key || "").trim().toLowerCase();
+                    const sysMatch = systemDefaultHeaders.value.find(s => s.key.toLowerCase() === k);
+                    if (sysMatch && !sysMatch.isCalculated) {
+                        sysMatch.enabled = h.enabled !== false;
+                        if (h.value !== undefined && h.value !== null) {
+                            sysMatch.value = h.value;
+                        }
+                    } else {
+                        customHeaders.push({
+                            enabled: h.enabled !== false,
+                            key: h.key || "",
+                            value: h.value || "",
+                            description: h.description || ""
+                        });
+                    }
+                });
             }
+            apiHeadersList.value = customHeaders.length > 0 ? customHeaders : [
+                { enabled: true, key: "", value: "", description: "" }
+            ];
 
             apiBodyType.value = row.http_body_type || "none";
             apiBodyText.value = row.http_body || "";
@@ -1852,7 +1914,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                     http_method: apiForm.value.http_method,
                     http_path: apiForm.value.http_path.trim(),
                     http_params: apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim()),
-                    http_headers: apiHeadersList.value.filter(h => h.enabled && h.key && h.key.trim()),
+                    http_headers: getEffectiveHeaders(),
                     http_body_type: apiBodyType.value,
                     http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
                     auth_type: apiAuthType.value,
@@ -1964,7 +2026,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
                 is_active: true,
                 email_receivers: receivers,
                 http_params: apiParamsList.value.filter(p => p.key && p.key.trim() !== ""),
-                http_headers: apiHeadersList.value.filter(h => h.key && h.key.trim() !== ""),
+                http_headers: getEffectiveHeaders(),
                 http_body_type: apiBodyType.value,
                 http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
                 auth_type: apiAuthType.value,
@@ -2488,7 +2550,7 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             });
         });
 
-        return {
+        const setupResult = {
             loading,
             targets,
             groupList,
@@ -2642,7 +2704,11 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             removeParamRow,
             addHeaderRow,
             removeHeaderRow,
-            applyHeaderPreset,
+            systemDefaultHeaders,
+            showDefaultHeaders,
+            isHeaderOverridden,
+            activeDefaultHeadersCount,
+            getEffectiveHeaders,
             insertMacroToBody,
             formatBodyJson,
             minifyBodyJson,
@@ -2676,8 +2742,13 @@ console.log('CryptoJS 签名计算完成:', md5Hash);`,
             copyEnvVarRef,
             getVarRef
         };
+
+        // 调试与自动化测试全局挂载
+        window.SchemaPulseApp = setupResult;
+
+        return setupResult;
     }
 });
 
 app.use(ElementPlus);
-app.mount("#app");
+window.app = app.mount("#app");

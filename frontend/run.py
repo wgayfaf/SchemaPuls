@@ -36,9 +36,8 @@ class DevServerHandler(http.server.SimpleHTTPRequestHandler):
         sys.stdout.flush()
 
 def run_server(port=PORT):
-    # 允许地址立即重用
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", port), DevServerHandler) as httpd:
+    # 允许并发处理与地址立即重用，彻底消除 Keep-Alive 导致的网络阻塞
+    with http.server.ThreadingHTTPServer(("", port), DevServerHandler) as httpd:
         print("=" * 60)
         print("   SchemaPulse - 独立前端开发服务 (Frontend DevServer)")
         print("=" * 60)
