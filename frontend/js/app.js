@@ -130,6 +130,8 @@ const app = createApp({
             header_key: "Authorization",
             header_value: ""
         });
+        const apiPreActionsList = ref([]);
+        const apiPostActionsList = ref([]);
         const apiTestRunning = ref(false);
         const apiTestResult = ref(null);
 
@@ -221,20 +223,26 @@ const app = createApp({
         });
 
         // 故障异常节点提取 (用于 Incidents 视图)
+        // 核心规则：严格只纳管【接口管理】(apiList) 中当前真实存在的受损接口，接口管理中没有的接口绝对不显示
         const incidentSearchQuery = ref("");
         const downTargets = computed(() => {
-            return targets.value.filter(t => t.current_status === "DOWN" || t.current_status === "DEGRADED");
+            return apiList.value.filter(a => 
+                a.current_status === "DOWN" || 
+                a.current_status === "DEGRADED" || 
+                a.current_status === "CIRCUIT_BROKEN"
+            );
         });
         const filteredDownTargets = computed(() => {
             if (!incidentSearchQuery.value || !incidentSearchQuery.value.trim()) {
                 return downTargets.value;
             }
             const q = incidentSearchQuery.value.toLowerCase().trim();
-            return downTargets.value.filter(t => 
-                (t.name && t.name.toLowerCase().includes(q)) ||
-                (t.host && t.host.toLowerCase().includes(q)) ||
-                (t.http_path && t.http_path.toLowerCase().includes(q)) ||
-                (t.group_name && t.group_name.toLowerCase().includes(q))
+            return downTargets.value.filter(a => 
+                (a.name && a.name.toLowerCase().includes(q)) ||
+                (a.machine_host && a.machine_host.toLowerCase().includes(q)) ||
+                (a.machine_name && a.machine_name.toLowerCase().includes(q)) ||
+                (a.http_path && a.http_path.toLowerCase().includes(q)) ||
+                (a.environment_name && a.environment_name.toLowerCase().includes(q))
             );
         });
 
@@ -882,17 +890,24 @@ const app = createApp({
             try {
                 const res = await axios.post(`/api/machines/${row.id}/trigger`);
                 const data = res.data;
-                if (data.tcp_ok) {
+                if (data.ping_ok && data.tcp_ok) {
                     ElementPlus.ElNotification({
-                        title: `TCP 探活正常 [${row.name}]`,
-                        message: `目标 ${row.host}:${row.port} 握手成功，网络延迟: ${data.tcp_latency_ms} ms`,
+                        title: `探活正常 [${row.name}]`,
+                        message: `主机 Ping 正常 (${data.ping_latency_ms ? data.ping_latency_ms + ' ms' : '<1ms'})，端口 ${row.port} 握手成功 (${data.tcp_latency_ms} ms)`,
                         type: "success"
+                    });
+                } else if (!data.ping_ok) {
+                    ElementPlus.ElNotification({
+                        title: `主机不可达/离线 [${row.name}]`,
+                        message: `目标主机 ${row.host} Ping 不通或超时，机器已判定离线`,
+                        type: "error",
+                        duration: 6000
                     });
                 } else {
                     ElementPlus.ElNotification({
-                        title: `TCP 连接异常 [${row.name}]`,
-                        message: `目标 ${row.host}:${row.port} 探测失败: ${data.error_message || '连接超时'}`,
-                        type: "error",
+                        title: `主机在线/端口未开启 [${row.name}]`,
+                        message: `主机在线 (Ping ${data.ping_latency_ms} ms)，但服务端口 ${row.port} 握手失败: ${data.error_message || '连接拒绝'}`,
+                        type: "warning",
                         duration: 6000
                     });
                 }
@@ -1139,8 +1154,172 @@ const app = createApp({
                 header_key: "Authorization",
                 header_value: ""
             };
+            apiPreActionsList.value = [];
+            apiPostActionsList.value = [
+                { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", description: "" }
+            ];
             apiTestResult.value = null;
             apiDialogVisible.value = true;
+        };
+
+        const addPreActionRow = () => {
+            apiPreActionsList.value.push({
+                enabled: true,
+                type: "set_variable",
+                key: "",
+                value: "",
+                description: ""
+            });
+        };
+
+        const removePreActionRow = (idx) => {
+            apiPreActionsList.value.splice(idx, 1);
+        };
+
+        const applyPreActionPreset = (preset) => {
+            if (preset === 'timestamp') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "set_variable",
+                    key: "timestamp",
+                    value: "{{$timestamp}}",
+                    description: "当前10位秒级时间戳"
+                });
+            } else if (preset === 'uuid') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "inject_header",
+                    key: "X-Trace-Id",
+                    value: "{{$uuid}}",
+                    description: "请求链路追踪UUID"
+                });
+            } else if (preset === 'random_param') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "inject_param",
+                    key: "rand",
+                    value: "{{$randomInt(1000, 9999)}}",
+                    description: "防缓存随机参数"
+                });
+            } else if (preset === 'script') {
+                apiPreActionsList.value.push({
+                    enabled: true,
+                    type: "custom_script",
+                    key: "",
+                    value: "variables['sign'] = 'sign_' + str(int(time.time()))",
+                    description: "Python 动态签名脚本"
+                });
+            }
+            ElementPlus.ElMessage.success("已添加前置操作预设！");
+        };
+
+        const addPostActionRow = () => {
+            apiPostActionsList.value.push({
+                enabled: true,
+                name: "验证响应状态",
+                type: "assert_status_code",
+                expression: "",
+                operator: "equals",
+                target_value: "200",
+                description: ""
+            });
+        };
+
+        const removePostActionRow = (idx) => {
+            apiPostActionsList.value.splice(idx, 1);
+        };
+
+        const onPostActionTypeChange = (item) => {
+            if (item.type === 'assert_status_code') {
+                item.name = item.name || "HTTP 状态码等于 200";
+                item.expression = "";
+                item.operator = "equals";
+                item.target_value = "200";
+            } else if (item.type === 'assert_latency') {
+                item.name = item.name || "响应耗时 < 1000ms";
+                item.expression = "";
+                item.operator = "less_than";
+                item.target_value = "1000";
+            } else if (item.type === 'assert_json_path') {
+                item.name = item.name || "验证 JSON 字段值";
+                item.expression = item.expression || "code";
+                item.operator = "equals";
+                item.target_value = "200";
+            } else if (item.type === 'assert_header') {
+                item.name = item.name || "响应头校验";
+                item.expression = item.expression || "content-type";
+                item.operator = "contains";
+                item.target_value = "application/json";
+            } else if (item.type === 'assert_body_contains') {
+                item.name = item.name || "响应内容包含关键字";
+                item.expression = "";
+                item.operator = "contains";
+                item.target_value = "OK";
+            } else if (item.type === 'extract_variable') {
+                item.name = item.name || "提取响应数据";
+                item.expression = item.expression || "data.id";
+                item.operator = "extract";
+                item.target_value = "targetId";
+            }
+        };
+
+        const applyPostActionPreset = (preset) => {
+            if (preset === 'status_200') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "状态码等于 200",
+                    type: "assert_status_code",
+                    expression: "",
+                    operator: "equals",
+                    target_value: "200"
+                });
+            } else if (preset === 'status_2xx') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "状态码在 2xx 成功范围",
+                    type: "assert_status_code",
+                    expression: "",
+                    operator: "in_2xx",
+                    target_value: ""
+                });
+            } else if (preset === 'latency_1000') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "响应耗时 < 1000ms",
+                    type: "assert_latency",
+                    expression: "",
+                    operator: "less_than",
+                    target_value: "1000"
+                });
+            } else if (preset === 'json_code') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "JSON code 等于 200",
+                    type: "assert_json_path",
+                    expression: "code",
+                    operator: "equals",
+                    target_value: "200"
+                });
+            } else if (preset === 'contains_ok') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "响应文本包含 OK",
+                    type: "assert_body_contains",
+                    expression: "",
+                    operator: "contains",
+                    target_value: "OK"
+                });
+            } else if (preset === 'extract_var') {
+                apiPostActionsList.value.push({
+                    enabled: true,
+                    name: "提取响应 Token",
+                    type: "extract_variable",
+                    expression: "data.token",
+                    operator: "extract",
+                    target_value: "authToken"
+                });
+            }
+            ElementPlus.ElMessage.success("已添加后置断言预设！");
         };
 
         const openEditApiDialog = (row) => {
@@ -1219,6 +1398,36 @@ const app = createApp({
                 header_value: ""
             }, row.auth_config || {});
 
+            // 恢复 Pre-request Actions
+            if (row.pre_actions && Array.isArray(row.pre_actions)) {
+                apiPreActionsList.value = row.pre_actions.map(a => ({
+                    enabled: a.enabled !== false,
+                    type: a.type || "set_variable",
+                    key: a.key || "",
+                    value: a.value || "",
+                    description: a.description || ""
+                }));
+            } else {
+                apiPreActionsList.value = [];
+            }
+
+            // 恢复 Post-response Actions
+            if (row.post_actions && Array.isArray(row.post_actions)) {
+                apiPostActionsList.value = row.post_actions.map(a => ({
+                    enabled: a.enabled !== false,
+                    name: a.name || "",
+                    type: a.type || "assert_status_code",
+                    expression: a.expression || "",
+                    operator: a.operator || "equals",
+                    target_value: a.target_value !== undefined ? a.target_value : "",
+                    description: a.description || ""
+                }));
+            } else {
+                apiPostActionsList.value = [
+                    { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", description: "" }
+                ];
+            }
+
             apiTestResult.value = null;
             apiDialogVisible.value = true;
         };
@@ -1276,11 +1485,17 @@ const app = createApp({
                     http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
                     auth_type: apiAuthType.value,
                     auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
-                    expected_schema: parsedSchema
+                    expected_schema: parsedSchema,
+                    pre_actions: apiPreActionsList.value.filter(a => a.enabled),
+                    post_actions: apiPostActionsList.value.filter(a => a.enabled)
                 };
                 const res = await axios.post("/api/apis/test-run", testPayload);
                 apiTestResult.value = res.data;
-                if (res.data.status_code >= 200 && res.data.status_code < 300) {
+
+                if (res.data.assertions_summary && res.data.assertions_summary.total > 0 && !res.data.assertions_summary.all_passed) {
+                    apiResponseTab.value = "assertions";
+                    ElementPlus.ElMessage.warning(`调试完成: 状态码 ${res.data.status_code || '异常'}，但有 ${res.data.assertions_summary.total - res.data.assertions_summary.passed_count} 项后置断言未通过`);
+                } else if (res.data.status_code >= 200 && res.data.status_code < 300) {
                     ElementPlus.ElMessage.success(`调试请求完成 [${res.data.status_code} OK] (${res.data.latency_ms}ms)`);
                 } else {
                     ElementPlus.ElMessage.warning(`响应状态码: ${res.data.status_code || '异常'} (${res.data.latency_ms || 0}ms)`);
@@ -1293,6 +1508,8 @@ const app = createApp({
                     schema_error: err.response?.data?.detail || err.message,
                     response_data: { error: err.response?.data?.detail || err.message },
                     response_headers: {},
+                    assertions_result: [],
+                    assertions_summary: { all_passed: false, total: 0, passed_count: 0 },
                     resolved_url: ""
                 };
                 ElementPlus.ElMessage.error("请求调试异常: " + (err.response?.data?.detail || err.message));
@@ -1363,7 +1580,9 @@ const app = createApp({
                 http_body_type: apiBodyType.value,
                 http_body: apiBodyType.value !== "none" ? apiBodyText.value : null,
                 auth_type: apiAuthType.value,
-                auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null
+                auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
+                pre_actions: apiPreActionsList.value.filter(a => a.key || a.value || a.type === 'custom_script'),
+                post_actions: apiPostActionsList.value.filter(a => a.type)
             };
 
             apiSubmitting.value = true;
@@ -1437,13 +1656,24 @@ const app = createApp({
         };
 
         const openApiMetricsDrawer = async (row) => {
+            const host = row.machine_host || "";
+            const port = row.machine_port || 80;
+            const fullUrl = row.full_url || ((row.base_url || ('http://' + host + ':' + port)) + (row.http_path || ''));
+
             activeTarget.value = {
                 id: row.id,
                 name: row.name,
                 group_name: row.environment_name || "生产环境",
-                host: row.machine_host || "",
-                port: row.machine_port || 80,
-                http_path: row.http_path
+                host: host,
+                port: port,
+                http_path: row.http_path,
+                http_method: row.http_method || "GET",
+                machine_name: row.machine_name || `${host}:${port}`,
+                machine_status: row.machine_status,
+                full_url: fullUrl,
+                current_status: row.current_status,
+                cron_interval_minutes: row.cron_interval_minutes || 5,
+                last_http_latency_ms: row.last_http_latency_ms
             };
             drawerVisible.value = true;
             loadingHistory.value = true;
@@ -1453,29 +1683,22 @@ const app = createApp({
                     axios.get(`/api/apis/${row.id}/history?limit=50`),
                     axios.get(`/api/apis/${row.id}/metrics`)
                 ]);
+                // 严格只展示当前接口自身专属探测历史，杜绝跨表/跨接口脏数据污染
                 historyList.value = Array.isArray(historyRes.data) ? historyRes.data : [];
                 loadingHistory.value = false;
                 await nextTick();
                 setTimeout(() => {
-                    renderChart(metricsRes.data.points || []);
+                    renderChart(metricsRes.data?.points || []);
                 }, 150);
             } catch (err) {
                 console.error("加载接口时序与历史异常:", err);
-                try {
-                    const [fallbackHist, fallbackMet] = await Promise.all([
-                        axios.get(`/api/targets/${row.id}/history?limit=50`),
-                        axios.get(`/api/targets/${row.id}/metrics?hours=24`)
-                    ]);
-                    historyList.value = Array.isArray(fallbackHist.data) ? fallbackHist.data : [];
-                    loadingHistory.value = false;
-                    await nextTick();
-                    setTimeout(() => {
-                        renderChart(Array.isArray(fallbackMet.data) ? fallbackMet.data : []);
-                    }, 150);
-                } catch (fallbackErr) {
-                    ElementPlus.ElMessage.error("加载时序日志失败: " + (err.response?.data?.detail || err.message));
-                    loadingHistory.value = false;
-                }
+                ElementPlus.ElMessage.error("加载接口专属时序历史失败: " + (err.response?.data?.detail || err.message));
+                historyList.value = [];
+                loadingHistory.value = false;
+                await nextTick();
+                setTimeout(() => {
+                    renderChart([]);
+                }, 150);
             }
         };
 
@@ -2034,7 +2257,17 @@ const app = createApp({
             applyHeaderPreset,
             insertMacroToBody,
             handleTestRunApi,
-            inferSchemaFromTestResult
+            inferSchemaFromTestResult,
+            // 前置操作与后置操作导出
+            apiPreActionsList,
+            apiPostActionsList,
+            addPreActionRow,
+            removePreActionRow,
+            applyPreActionPreset,
+            addPostActionRow,
+            removePostActionRow,
+            onPostActionTypeChange,
+            applyPostActionPreset
         };
     }
 });

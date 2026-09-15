@@ -51,7 +51,11 @@ class MachineNode(SQLModel, table=True):
     # 运行状态与指标
     current_status: str = Field(default="UNKNOWN")      # ONLINE, OFFLINE, DEGRADED, UNKNOWN
     consecutive_failures: int = Field(default=0)
+    ping_ok: Optional[bool] = None                      # 主机 Ping (ICMP) 连通状态
+    last_ping_latency_ms: Optional[float] = None        # 最新主机 Ping 延时(ms)
+    tcp_ok: Optional[bool] = None                       # 服务端口 (TCP) 连通状态
     last_tcp_latency_ms: Optional[float] = None         # 最新 TCP 握手延时(ms)
+    last_error_message: Optional[str] = None            # 最近探活诊断或错误明细
     last_probed_at: Optional[datetime] = None
     last_alert_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -74,6 +78,8 @@ class ApiProbe(SQLModel, table=True):
     auth_type: str = Field(default="none")                                        # none, bearer, basic
     auth_config: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))       # 鉴权配置，如 token 或 basic 凭证
     expected_schema: Dict[str, Any] = Field(sa_column=Column(JSON)) # Draft-7 JSON Schema
+    pre_actions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 前置操作 (变量定义/请求头注入/参数注入/前置脚本)
+    post_actions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 后置操作 (状态码断言/耗时断言/JSONPath断言/变量提取)
     cron_interval_minutes: int = Field(default=5)
     is_active: bool = Field(default=True)
     
@@ -98,12 +104,14 @@ class ApiProbe(SQLModel, table=True):
 # ==========================================================
 
 class MachineProbeHistory(SQLModel, table=True):
-    """机器节点端口握手探测历史"""
+    """机器节点探活历史 (Ping 主机探活 + TCP 端口探活)"""
     __tablename__ = "machine_probe_histories"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     machine_id: int = Field(foreign_key="machine_nodes.id", index=True)
-    tcp_ok: bool
+    ping_ok: bool = Field(default=False)
+    ping_latency_ms: Optional[float] = None
+    tcp_ok: bool = Field(default=False)
     tcp_latency_ms: Optional[float] = None
     error_message: Optional[str] = None
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -121,6 +129,7 @@ class ApiProbeHistory(SQLModel, table=True):
     http_latency_ms: Optional[float] = None
     schema_matched: bool = Field(default=False)
     schema_diff_detail: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
+    assertions_result: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON)) # 后置操作断言对比明细
     raw_response_snippet: Optional[str] = None
     is_healthy: bool = Field(default=False, index=True)
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, delete
+from sqlalchemy import text
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel
@@ -312,7 +313,11 @@ def list_machines(environment_id: Optional[int] = None, group_id: Optional[int] 
             "email_receivers": m.email_receivers or [],
             "current_status": m.current_status,
             "consecutive_failures": m.consecutive_failures,
+            "ping_ok": m.ping_ok,
+            "last_ping_latency_ms": m.last_ping_latency_ms,
+            "tcp_ok": m.tcp_ok,
             "last_tcp_latency_ms": m.last_tcp_latency_ms,
+            "last_error_message": m.last_error_message,
             "last_probed_at": m.last_probed_at.isoformat() if m.last_probed_at else None,
             "created_at": m.created_at.isoformat() if m.created_at else None,
             "group_id": m.group_id,
@@ -382,7 +387,11 @@ def create_machine(data: MachinePayload, session: Session = Depends(get_session)
         "cron_interval_minutes": machine.cron_interval_minutes,
         "is_active": machine.is_active,
         "current_status": machine.current_status,
+        "ping_ok": machine.ping_ok,
+        "last_ping_latency_ms": machine.last_ping_latency_ms,
+        "tcp_ok": machine.tcp_ok,
         "last_tcp_latency_ms": machine.last_tcp_latency_ms,
+        "last_error_message": machine.last_error_message,
         "email_receivers": machine.email_receivers or [],
         "group_id": machine.group_id,
         "group_name": grp.name if grp else "核心集群",
@@ -435,7 +444,11 @@ def update_machine(id: int, data: MachinePayload, session: Session = Depends(get
         "cron_interval_minutes": machine.cron_interval_minutes,
         "is_active": machine.is_active,
         "current_status": machine.current_status,
+        "ping_ok": machine.ping_ok,
+        "last_ping_latency_ms": machine.last_ping_latency_ms,
+        "tcp_ok": machine.tcp_ok,
         "last_tcp_latency_ms": machine.last_tcp_latency_ms,
+        "last_error_message": machine.last_error_message,
         "email_receivers": machine.email_receivers or [],
         "group_id": machine.group_id,
         "group_name": grp.name if grp else "核心集群",
@@ -453,7 +466,9 @@ def delete_machine(id: int, session: Session = Depends(get_session)):
     apis = session.exec(select(ApiProbe).where(ApiProbe.machine_id == id)).all()
     for a in apis:
         remove_api_job(a.id)
+        session.exec(text(f"DELETE FROM api_probe_histories WHERE api_probe_id = {a.id}"))
         session.delete(a)
+    session.exec(text(f"DELETE FROM machine_probe_histories WHERE machine_id = {id}"))
     session.delete(machine)
     session.commit()
     return {"status": "ok", "message": f"机器节点 id={id} 已删除"}
@@ -482,6 +497,8 @@ class ApiPayload(BaseModel):
     auth_type: str = "none"
     auth_config: Optional[Dict[str, Any]] = {}
     expected_schema: Dict[str, Any]
+    pre_actions: List[Dict[str, Any]] = []
+    post_actions: List[Dict[str, Any]] = []
     cron_interval_minutes: int = 5
     is_active: bool = True
     email_receivers: List[str] = []
@@ -501,6 +518,8 @@ class ApiTestRunPayload(BaseModel):
     auth_type: str = "none"
     auth_config: Optional[Dict[str, Any]] = {}
     expected_schema: Optional[Dict[str, Any]] = None
+    pre_actions: Optional[List[Dict[str, Any]]] = []
+    post_actions: Optional[List[Dict[str, Any]]] = []
 
 
 # 4. 接口探针层 CRUD 与即时业务校验
@@ -549,6 +568,8 @@ def list_apis(
             "auth_type": a.auth_type or "none",
             "auth_config": a.auth_config or {},
             "expected_schema": a.expected_schema,
+            "pre_actions": a.pre_actions or [],
+            "post_actions": a.post_actions or [],
             "cron_interval_minutes": a.cron_interval_minutes,
             "is_active": a.is_active,
             "retry_threshold": a.retry_threshold,
@@ -608,24 +629,38 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
     if not rendered_path.startswith("/"):
         rendered_path = "/" + rendered_path
 
+    # 执行【前置操作 (Pre-request Actions)】
+    from app.services.action_engine import execute_pre_actions, execute_post_actions
+    final_headers, final_params, final_body, final_path, variables = execute_pre_actions(
+        pre_actions=data.pre_actions,
+        headers=req_headers,
+        params=req_params,
+        body=rendered_body,
+        path=rendered_path,
+        auth_token=auth_token
+    )
+
+    if not final_path.startswith("/"):
+        final_path = "/" + final_path
+
     effective_base = data.base_url or (machine.base_url if machine else None)
     if effective_base and effective_base.strip():
-        url = f"{effective_base.strip().rstrip('/')}{rendered_path}"
+        url = f"{effective_base.strip().rstrip('/')}{final_path}"
     else:
         scheme = "https" if machine.port == 443 else "http"
         url = (
-            f"{scheme}://{machine.host}:{machine.port}{rendered_path}"
+            f"{scheme}://{machine.host}:{machine.port}{final_path}"
             if machine.port not in [80, 443]
-            else f"{scheme}://{machine.host}{rendered_path}"
+            else f"{scheme}://{machine.host}{final_path}"
         )
 
-    from app.services.probe_service import check_http, check_schema
-    http_ok, http_code, http_ms, json_data, http_err = await check_http(
+    from app.services.probe_service import check_http_detailed, check_schema
+    http_ok, http_code, http_ms, json_data, http_err, resp_headers, resp_text = await check_http_detailed(
         url,
         method=data.http_method,
-        headers=req_headers,
-        params=req_params if req_params else None,
-        body=rendered_body,
+        headers=final_headers,
+        params=final_params if final_params else None,
+        body=final_body,
         body_type=data.http_body_type
     )
 
@@ -638,18 +673,39 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
             schema_matched = False
             schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
 
+    # 执行【后置操作 (Post-response Actions / Assertions)】
+    all_assertions_passed, assertions_result, extracted_vars = execute_post_actions(
+        post_actions=data.post_actions,
+        status_code=http_code,
+        latency_ms=http_ms,
+        response_headers=resp_headers,
+        response_data=json_data,
+        response_text=resp_text,
+        context_variables=variables
+    )
+
     return {
         "status_code": http_code,
         "latency_ms": http_ms,
         "is_ok": http_ok,
         "error_message": http_err,
         "response_data": json_data,
+        "response_headers": resp_headers,
+        "response_text": resp_text[:1000] if resp_text else None,
         "schema_matched": schema_matched,
         "schema_errors": schema_errors,
+        "assertions_summary": {
+            "all_passed": all_assertions_passed,
+            "total": len(assertions_result),
+            "passed_count": sum(1 for a in assertions_result if a.get("passed", False))
+        },
+        "assertions_result": assertions_result,
+        "extracted_variables": extracted_vars,
         "request_url": url,
         "resolved_url": url,
-        "rendered_headers": req_headers,
-        "rendered_params": req_params
+        "rendered_headers": final_headers,
+        "rendered_params": final_params,
+        "rendered_body": final_body
     }
 
 
@@ -672,6 +728,8 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         auth_type=data.auth_type,
         auth_config=data.auth_config,
         expected_schema=data.expected_schema,
+        pre_actions=data.pre_actions,
+        post_actions=data.post_actions,
         cron_interval_minutes=data.cron_interval_minutes,
         is_active=data.is_active,
         retry_threshold=data.retry_threshold,
@@ -681,6 +739,11 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
     session.add(api)
     session.commit()
     session.refresh(api)
+
+    # 防御性清理该接口 ID 可能残留的历史脏数据（如旧测试用例或删除残留），确保新接口历史 100% 纯净专属
+    session.exec(text(f"DELETE FROM api_probe_histories WHERE api_probe_id = {api.id}"))
+    session.commit()
+
     add_api_job(api)
     
     grp = session.get(ServiceGroup, machine.group_id) if machine.group_id else None
@@ -727,6 +790,8 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         "auth_type": api.auth_type or "none",
         "auth_config": api.auth_config or {},
         "expected_schema": api.expected_schema,
+        "pre_actions": api.pre_actions or [],
+        "post_actions": api.post_actions or [],
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,
         "current_status": api.current_status,
@@ -762,6 +827,8 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     api.auth_type = data.auth_type
     api.auth_config = data.auth_config
     api.expected_schema = data.expected_schema
+    api.pre_actions = data.pre_actions
+    api.post_actions = data.post_actions
     api.cron_interval_minutes = data.cron_interval_minutes
     api.is_active = data.is_active
     api.email_receivers = data.email_receivers
@@ -809,6 +876,8 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
         "auth_type": api.auth_type or "none",
         "auth_config": api.auth_config or {},
         "expected_schema": api.expected_schema,
+        "pre_actions": api.pre_actions or [],
+        "post_actions": api.post_actions or [],
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,
         "current_status": api.current_status,
@@ -828,9 +897,12 @@ def delete_api(id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="ApiProbe not found")
     name = api.name
     remove_api_job(id)
+    # 级联清除该接口专属历史探测流水，杜绝孤儿脏数据污染
+    session.exec(text(f"DELETE FROM api_probe_histories WHERE api_probe_id = {id}"))
     targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == name)).all()
     for t in targets:
         remove_target_job(t.id)
+        session.exec(text(f"DELETE FROM probe_histories WHERE target_id = {t.id}"))
         session.delete(t)
     session.delete(api)
     session.commit()
@@ -1000,29 +1072,42 @@ def get_machine_metrics(id: int, session: Session = Depends(get_session)):
     return {"machine_id": id, "points": points}
 
 
-# 接口探针时序指标
+# 接口探针时序指标 (严格专属当前接口)
 @app.get("/api/apis/{id}/metrics")
 def get_api_metrics(id: int, session: Session = Depends(get_session)):
+    api = session.get(ApiProbe, id)
+    if not api:
+        raise HTTPException(status_code=404, detail=f"接口探针 [ID={id}] 不存在")
+
+    machine = session.get(MachineNode, api.machine_id) if api.machine_id else None
+    tcp_latency = machine.last_tcp_latency_ms if machine else None
+
     records = session.exec(
         select(ApiProbeHistory)
         .where(ApiProbeHistory.api_probe_id == id)
         .order_by(ApiProbeHistory.probed_at.desc())
         .limit(100)
     ).all()
+
     points = [
         {
-            "time": r.probed_at.strftime("%H:%M:%S"),
+            "time": r.probed_at.strftime("%H:%M:%S") if r.probed_at else "--:--:--",
             "http_ms": r.http_latency_ms or 0.0,
+            "tcp_ms": None if r.circuit_broken else tcp_latency,
             "http_code": r.http_status_code,
             "is_healthy": r.is_healthy,
             "circuit_broken": r.circuit_broken
         }
         for r in reversed(records)
     ]
-    return {"api_id": id, "points": points}
+    return {
+        "api_id": id,
+        "api_name": api.name,
+        "points": points
+    }
 
 
-# 接口探针历史探测流水记录
+# 接口探针历史探测流水记录 (严格专属当前接口，绝不混入老 targets 或其它接口历史)
 @app.get("/api/apis/{id}/history")
 def get_api_history(
     id: int,
@@ -1030,10 +1115,14 @@ def get_api_history(
     session: Session = Depends(get_session)
 ):
     api = session.get(ApiProbe, id)
-    machine = session.get(MachineNode, api.machine_id) if api else None
+    if not api:
+        raise HTTPException(status_code=404, detail=f"接口探针 [ID={id}] 不存在")
+
+    machine = session.get(MachineNode, api.machine_id) if api.machine_id else None
     tcp_ok = (machine.current_status != "OFFLINE") if machine else True
     tcp_latency = machine.last_tcp_latency_ms if machine else None
 
+    # 严格根据 api_probe_id 检索专属历史流水
     records = session.exec(
         select(ApiProbeHistory)
         .where(ApiProbeHistory.api_probe_id == id)
@@ -1041,44 +1130,14 @@ def get_api_history(
         .limit(limit)
     ).all()
 
-    # 如果 ApiProbeHistory 为空，尝试查找同名的 MonitorTarget 历史记录
-    if not records:
-        target = None
-        if api:
-            target = session.exec(select(MonitorTarget).where(MonitorTarget.name == api.name)).first()
-        if not target:
-            target = session.get(MonitorTarget, id)
-        if target:
-            target_records = session.exec(
-                select(ProbeHistory)
-                .where(ProbeHistory.target_id == target.id)
-                .order_by(ProbeHistory.probed_at.desc())
-                .limit(limit)
-            ).all()
-            if target_records:
-                return [
-                    {
-                        "id": r.id,
-                        "probed_at": r.probed_at.isoformat() if r.probed_at else None,
-                        "tcp_ok": r.tcp_ok,
-                        "tcp_latency_ms": r.tcp_latency_ms,
-                        "http_status_code": r.http_status_code,
-                        "http_latency_ms": r.http_latency_ms,
-                        "schema_matched": r.schema_matched,
-                        "schema_diff_detail": r.schema_diff_detail,
-                        "raw_response_snippet": r.raw_response_snippet,
-                        "is_healthy": r.is_healthy,
-                        "circuit_broken": False
-                    }
-                    for r in target_records
-                ]
-
     res = []
     for r in records:
         res.append({
             "id": r.id,
             "api_probe_id": r.api_probe_id,
+            "api_name": api.name,
             "machine_id": r.machine_id,
+            "machine_name": machine.name if machine else None,
             "circuit_broken": r.circuit_broken,
             "tcp_ok": False if r.circuit_broken else tcp_ok,
             "tcp_latency_ms": None if r.circuit_broken else tcp_latency,
@@ -1091,6 +1150,7 @@ def get_api_history(
             "probed_at": r.probed_at.isoformat() if r.probed_at else None
         })
     return res
+
 
 
 # ==========================================================

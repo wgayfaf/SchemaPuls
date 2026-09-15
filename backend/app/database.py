@@ -61,6 +61,8 @@ def init_db():
             ("http_body", "TEXT"),
             ("auth_type", "VARCHAR(32) DEFAULT 'none'"),
             ("auth_config", "TEXT DEFAULT '{}'"),
+            ("pre_actions", "TEXT DEFAULT '[]'"),
+            ("post_actions", "TEXT DEFAULT '[]'"),
         ]
         for col_name, col_def in api_columns_to_add:
             try:
@@ -81,6 +83,10 @@ def init_db():
 
         machine_columns_to_add = [
             ("base_url", "VARCHAR(255)"),
+            ("ping_ok", "BOOLEAN"),
+            ("last_ping_latency_ms", "FLOAT"),
+            ("tcp_ok", "BOOLEAN"),
+            ("last_error_message", "TEXT"),
         ]
         for col_name, col_def in machine_columns_to_add:
             try:
@@ -88,7 +94,38 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
+
+        history_columns_to_add = [
+            ("ping_ok", "BOOLEAN DEFAULT 0"),
+            ("ping_latency_ms", "FLOAT"),
+        ]
+        for col_name, col_def in history_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE machine_probe_histories ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
+
+        api_history_columns_to_add = [
+            ("assertions_result", "TEXT DEFAULT '[]'"),
+        ]
+        for col_name, col_def in api_history_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE api_probe_histories ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
                 
+        # 自动清理已删除接口/机器残留的孤儿历史与幽灵老目标，保证系统数据源 100% 严格一致
+        try:
+            conn.execute(text("DELETE FROM api_probe_histories WHERE api_probe_id NOT IN (SELECT id FROM api_probes)"))
+            conn.execute(text("DELETE FROM machine_probe_histories WHERE machine_id NOT IN (SELECT id FROM machine_nodes)"))
+            conn.execute(text("DELETE FROM monitor_targets WHERE name NOT IN (SELECT name FROM api_probes)"))
+            conn.execute(text("DELETE FROM probe_histories WHERE target_id NOT IN (SELECT id FROM monitor_targets)"))
+            conn.commit()
+        except Exception:
+            pass
+
     # 自动执行单层平铺向四层拓扑结构平滑数据迁移
     migrate_flat_to_hierarchical()
 

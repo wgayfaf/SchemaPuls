@@ -174,12 +174,14 @@ def test_frontend_postman_elements():
     with open(os.path.join(frontend_dir, "index.html"), "r", encoding="utf-8") as f:
         html_content = f.read()
         assert "pm-url-bar" in html_content
-        assert "selectedMachineHost" in html_content
+        assert ("selectedMachineBaseUrl" in html_content or "selectedMachineHost" in html_content)
         assert "apiActiveTab" in html_content
         assert "handleTestRunApi" in html_content
         assert "inferSchemaFromTestResult" in html_content
         assert "pm-response-card" in html_content
-    print("[OK] HTML 模版中包含 URL 请求栏、Params/Headers/Body/Auth/Schema 多标签页及响应面板")
+        assert "pre_actions" in html_content
+        assert "post_actions" in html_content
+    print("[OK] HTML 模版中包含 URL 请求栏、Params/Headers/Body/Auth/前置/后置/Schema 多标签页及断言响应面板")
 
     # 验证 JS
     with open(os.path.join(frontend_dir, "js", "app.js"), "r", encoding="utf-8") as f:
