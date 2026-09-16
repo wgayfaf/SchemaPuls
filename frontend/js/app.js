@@ -1615,6 +1615,7 @@ const app = createApp({
                 expression: "",
                 operator: "equals",
                 target_value: "200",
+                value: "",
                 description: ""
             });
         };
@@ -1849,11 +1850,12 @@ const app = createApp({
                     expression: a.expression || "",
                     operator: a.operator || "equals",
                     target_value: a.target_value !== undefined ? a.target_value : "",
+                    value: a.value !== undefined ? a.value : (a.script || ""),
                     description: a.description || ""
                 }));
             } else {
                 apiPostActionsList.value = [
-                    { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", description: "" }
+                    { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", value: "", description: "" }
                 ];
             }
 

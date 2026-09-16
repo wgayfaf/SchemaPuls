@@ -1937,49 +1937,61 @@ export SMTP_USE_SSL="true"
                                         <el-option label="响应头校验" value="assert_header"></el-option>
                                         <el-option label="文本内容包含" value="assert_body_contains"></el-option>
                                         <el-option label="从响应提取变量" value="extract_variable"></el-option>
-                                        <el-option label="JavaScript 断言 (Postman Tests)" value="javascript"></el-option>
+                                        <el-option label="JavaScript 脚本 / 断言 (Postman Tests)" value="javascript"></el-option>
                                     </el-select>
                                 </td>
-                                <td>
-                                    <el-input
-                                        v-if="['assert_json_path', 'assert_header', 'extract_variable'].includes(item.type)"
-                                        v-model="item.expression" placeholder="如 code 或 data.id"
+
+                                <!-- 当类型为 javascript 脚本时，占据宽敞的 3 列并使用代码编辑器字体 -->
+                                <td v-if="item.type === 'javascript'" colspan="3">
+                                    <div style="margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                                        <span style="font-size: 11px; font-weight: 600; color: #d97706; display: inline-flex; align-items: center; gap: 4px;">
+                                            <i class="fa-brands fa-js"></i>Postman Tests / Apifox 后置 JS 脚本沙箱
+                                        </span>
+                                        <span style="font-size: 10.5px; color: #94a3b8;">支持 pm.response.json()、pm.environment.set()、pm.test() 等</span>
+                                    </div>
+                                    <el-input v-model="item.value" type="textarea" :rows="4"
+                                        style="font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.5;"
+                                        placeholder="const res = pm.response.json();&#10;if (res.code === 0 && res.data) {&#10;    pm.environment.set('token', res.data.accessToken);&#10;}&#10;pm.test('Status is 200', function () { pm.response.to.have.status(200); });"
                                         size="small"></el-input>
-                                    <el-input v-else-if="item.type === 'javascript'" v-model="item.value" type="textarea" :rows="2"
-                                        placeholder="pm.test('200 OK', function() { pm.response.to.have.status(200); });"
-                                        size="small"></el-input>
-                                    <span v-else style="font-size: 11.5px; color: #94a3b8;">自动比对</span>
                                 </td>
-                                <td>
-                                    <span v-if="item.type === 'javascript'"
-                                        style="font-size: 11.5px; color: #d97706; font-weight: 600;">pm.test 运行</span>
-                                    <el-select v-else-if="item.type !== 'extract_variable'" v-model="item.operator"
-                                        size="small" style="width: 100%;">
-                                        <el-option label="等于 (==)" value="equals"></el-option>
-                                        <el-option label="不等于 (!=)" value="not_equals"></el-option>
-                                        <el-option v-if="item.type === 'assert_status_code'" label="2xx 范围"
-                                            value="in_2xx"></el-option>
-                                        <el-option v-if="['assert_latency', 'assert_status_code'].includes(item.type)"
-                                            label="小于 (<=)" value="less_than"></el-option>
-                                        <el-option v-if="['assert_latency', 'assert_status_code'].includes(item.type)"
-                                            label="大于 (>)" value="greater_than"></el-option>
-                                        <el-option
-                                            v-if="['assert_json_path', 'assert_header', 'assert_body_contains'].includes(item.type)"
-                                            label="包含 (contains)" value="contains"></el-option>
-                                        <el-option v-if="item.type === 'assert_json_path'" label="非空校验"
-                                            value="not_empty"></el-option>
-                                    </el-select>
-                                    <span v-else
-                                        style="font-size: 11.5px; color: #0284c7; font-weight: 600;">提取存储</span>
-                                </td>
-                                <td>
-                                    <span v-if="item.type === 'javascript'" style="font-size: 11.5px; color: #94a3b8;">按脚本断言</span>
-                                    <el-input v-else-if="item.operator !== 'in_2xx' && item.operator !== 'not_empty'"
-                                        v-model="item.target_value"
-                                        :placeholder="item.type === 'extract_variable' ? '存入变量名 如 token' : '期望值 如 200'"
-                                        size="small"></el-input>
-                                    <span v-else style="font-size: 11.5px; color: #94a3b8;">无需输入期望值</span>
-                                </td>
+
+                                <!-- 其它普通断言规则显示 3 列 -->
+                                <template v-else>
+                                    <td>
+                                        <el-input
+                                            v-if="['assert_json_path', 'assert_header', 'extract_variable'].includes(item.type)"
+                                            v-model="item.expression" placeholder="如 code 或 data.id"
+                                            size="small"></el-input>
+                                        <span v-else style="font-size: 11.5px; color: #94a3b8;">自动比对</span>
+                                    </td>
+                                    <td>
+                                        <el-select v-if="item.type !== 'extract_variable'" v-model="item.operator"
+                                            size="small" style="width: 100%;">
+                                            <el-option label="等于 (==)" value="equals"></el-option>
+                                            <el-option label="不等于 (!=)" value="not_equals"></el-option>
+                                            <el-option v-if="item.type === 'assert_status_code'" label="2xx 范围"
+                                                value="in_2xx"></el-option>
+                                            <el-option v-if="['assert_latency', 'assert_status_code'].includes(item.type)"
+                                                label="小于 (<=)" value="less_than"></el-option>
+                                            <el-option v-if="['assert_latency', 'assert_status_code'].includes(item.type)"
+                                                label="大于 (>)" value="greater_than"></el-option>
+                                            <el-option
+                                                v-if="['assert_json_path', 'assert_header', 'assert_body_contains'].includes(item.type)"
+                                                label="包含 (contains)" value="contains"></el-option>
+                                            <el-option v-if="item.type === 'assert_json_path'" label="非空校验"
+                                                value="not_empty"></el-option>
+                                        </el-select>
+                                        <span v-else
+                                            style="font-size: 11.5px; color: #0284c7; font-weight: 600;">提取存储</span>
+                                    </td>
+                                    <td>
+                                        <el-input v-if="item.operator !== 'in_2xx' && item.operator !== 'not_empty'"
+                                            v-model="item.target_value"
+                                            :placeholder="item.type === 'extract_variable' ? '存入变量名 如 token' : '期望值 如 200'"
+                                            size="small"></el-input>
+                                        <span v-else style="font-size: 11.5px; color: #94a3b8;">无需输入期望值</span>
+                                    </td>
+                                </template>
                                 <td style="text-align: center;">
                                     <span class="pm-kv-action-btn" title="删除此行" @click="removePostActionRow(idx)">
                                         <i class="fa-solid fa-trash-can"></i>
