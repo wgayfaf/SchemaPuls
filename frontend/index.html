@@ -403,14 +403,24 @@
                                     </el-button>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="创建时间" width="180" align="center">
+                            <el-table-column label="环境变量池" width="150" align="center">
+                                <template #default="{ row }">
+                                    <el-button size="small" type="warning" plain @click="openEnvDialog(row)" title="点击管理该环境名下的环境变量">
+                                        <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>变量 ({{ Object.keys(row.variables || {}).length }})
+                                    </el-button>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="创建时间" width="170" align="center">
                                 <template #default="{ row }">
                                     <span style="color: #94a3b8; font-size: 12px;">{{ formatTime(row.created_at)
                                         }}</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="200" align="center" fixed="right">
+                            <el-table-column label="操作" width="280" align="center" fixed="right">
                                 <template #default="{ row }">
+                                    <el-button size="small" type="warning" plain @click="openEnvDialog(row)">
+                                        <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>变量管理
+                                    </el-button>
                                     <el-button size="small" type="primary" plain @click="openEditEnvDialog(row)">
                                         <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
                                     </el-button>
@@ -2517,7 +2527,17 @@ export SMTP_USE_SSL="true"
                                             </div>
                                         </td>
                                         <td>
-                                            <span class="code-pill" style="font-size: 11.5px;">{{ item.http_path }}</span>
+                                            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                                <span class="code-pill" style="font-size: 11.5px;">{{ item.http_path }}</span>
+                                                <el-tag v-if="item.http_params && item.http_params.some(p => p.description && p.description.includes('路径参数'))"
+                                                    size="small" type="info" effect="plain" style="font-size: 10.5px; height: 19px; padding: 0 4px; border-color: #cbd5e1; color: #475569;">
+                                                    <i class="fa-solid fa-code-merge" style="margin-right: 2px;"></i>路径参数
+                                                </el-tag>
+                                                <el-tag v-if="item.auth_type && item.auth_type !== 'none'"
+                                                    size="small" type="primary" effect="plain" style="font-size: 10.5px; height: 19px; padding: 0 4px;">
+                                                    <i class="fa-solid fa-key" style="margin-right: 2px;"></i>{{ item.auth_type === 'custom_header' ? 'Header鉴权' : (item.auth_type === 'bearer' ? 'Bearer' : 'Basic') }}
+                                                </el-tag>
+                                            </div>
                                         </td>
                                         <td style="text-align: center;">
                                             <div style="display: flex; justify-content: center; gap: 6px;">

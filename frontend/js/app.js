@@ -1026,17 +1026,68 @@ const app = createApp({
             }
         };
 
-        const openEnvDialog = () => {
-            const vars = currentMachineEnvironment.value.variables || {};
-            const list = Object.entries(vars).map(([k, v]) => ({
-                key: k,
-                value: typeof v === "object" ? JSON.stringify(v) : String(v)
-            }));
-            if (list.length === 0) {
-                list.push({ key: "", value: "" });
+        const openEnvDialog = async (targetEnv = null) => {
+            let envId = null;
+            let envName = "运行环境";
+            let envDesc = "";
+
+            // 过滤 Vue 点击事件注入的 MouseEvent/PointerEvent 对象
+            if (targetEnv && (targetEnv instanceof Event || targetEnv.target !== undefined)) {
+                targetEnv = null;
             }
-            envVariablesList.value = list;
-            envVarsDialogVisible.value = true;
+
+            if (targetEnv && typeof targetEnv === "object" && targetEnv.id) {
+                envId = targetEnv.id;
+                envName = targetEnv.name || "运行环境";
+                envDesc = targetEnv.description || "";
+            } else if (typeof targetEnv === "number") {
+                envId = targetEnv;
+                const found = environmentList.value.find(e => e.id === envId);
+                if (found) {
+                    envName = found.name;
+                    envDesc = found.description || "";
+                }
+            } else if (currentMachineEnvironment.value && currentMachineEnvironment.value.environment_id) {
+                envId = currentMachineEnvironment.value.environment_id;
+                envName = currentMachineEnvironment.value.name;
+                envDesc = currentMachineEnvironment.value.description;
+            } else if (apiForm.value.machine_id) {
+                await fetchMachineEnvironment(apiForm.value.machine_id);
+                envId = currentMachineEnvironment.value.environment_id;
+                envName = currentMachineEnvironment.value.name;
+                envDesc = currentMachineEnvironment.value.description;
+            }
+
+            if (!envId) {
+                ElementPlus.ElMessage.warning("尚未关联到有效的运行环境，无法查看环境变量");
+                return;
+            }
+
+            // 实时向后端拉取该环境最新的持久化环境变量池，确保绝对与前置/后置条件生成的变量保持 100% 同步
+            envVariablesSaving.value = true;
+            try {
+                const res = await axios.get(`/api/environments/${envId}/variables`);
+                const latestVars = res.data.variables || {};
+                currentMachineEnvironment.value = {
+                    environment_id: envId,
+                    name: envName,
+                    description: envDesc,
+                    variables: latestVars
+                };
+                const list = Object.entries(latestVars).map(([k, v]) => ({
+                    key: k,
+                    value: typeof v === "object" ? JSON.stringify(v) : String(v)
+                }));
+                if (list.length === 0) {
+                    list.push({ key: "", value: "" });
+                }
+                envVariablesList.value = list;
+                envVarsDialogVisible.value = true;
+            } catch (err) {
+                ElementPlus.ElMessage.error("获取最新环境变量失败: " + (err.response?.data?.detail || err.message));
+            } finally {
+                envVariablesSaving.value = false;
+            }
         };
 
         const addEnvVarRow = () => {
@@ -1143,11 +1194,17 @@ const app = createApp({
             try {
                 const currentPath = apiForm.value.http_path || "";
                 const basePath = currentPath.includes("?") ? currentPath.split("?")[0] : currentPath;
-                const activePairs = apiParamsList.value.filter(p => p.enabled && p.key && p.key.trim() !== "");
-                if (activePairs.length === 0) {
+                // 仅将纯 Query 参数拼接到 URL 尾部，排除路径变量 (如 {tableId} 或 :tableId 或 标注为路径参数的项)
+                const queryPairs = apiParamsList.value.filter(p => {
+                    if (!p.enabled || !p.key || !p.key.trim()) return false;
+                    const k = p.key.trim();
+                    const isPathVariable = basePath.includes(`{${k}}`) || basePath.includes(`:${k}`) || (p.description && p.description.includes("路径参数"));
+                    return !isPathVariable;
+                });
+                if (queryPairs.length === 0) {
                     apiForm.value.http_path = basePath;
                 } else {
-                    const q = activePairs.map(p => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value || "")}`).join("&");
+                    const q = queryPairs.map(p => `${encodeURIComponent(p.key.trim())}=${encodeURIComponent(p.value || "")}`).join("&");
                     apiForm.value.http_path = basePath ? `${basePath}?${q}` : `?${q}`;
                 }
             } finally {
@@ -1159,19 +1216,27 @@ const app = createApp({
             if (isSyncingUrlParams) return;
             isSyncingUrlParams = true;
             try {
-                if (!newPath || !newPath.includes("?")) {
-                    return;
-                }
-                const queryString = newPath.split("?")[1];
-                if (!queryString) return;
-                const searchParams = new URLSearchParams(queryString);
-                const newParams = [];
-                searchParams.forEach((val, key) => {
-                    newParams.push({ enabled: true, key, value: val, description: "" });
+                if (!newPath) return;
+                const basePath = newPath.includes("?") ? newPath.split("?")[0] : newPath;
+                const queryString = newPath.includes("?") ? newPath.split("?")[1] : "";
+                
+                // 保留原有的路径参数
+                const pathVarParams = apiParamsList.value.filter(p => {
+                    if (!p.key) return false;
+                    const k = p.key.trim();
+                    return basePath.includes(`{${k}}`) || basePath.includes(`:${k}`) || (p.description && p.description.includes("路径参数"));
                 });
-                if (newParams.length > 0) {
-                    apiParamsList.value = newParams;
+
+                const queryParams = [];
+                if (queryString) {
+                    const searchParams = new URLSearchParams(queryString);
+                    searchParams.forEach((val, key) => {
+                        queryParams.push({ enabled: true, key, value: val, description: "" });
+                    });
                 }
+                
+                const merged = [...pathVarParams, ...queryParams];
+                apiParamsList.value = merged.length > 0 ? merged : [{ enabled: true, key: "", value: "", description: "" }];
             } catch (e) {
                 // 忽略路径输入过程中的格式异常
             } finally {
@@ -1687,6 +1752,7 @@ const app = createApp({
                 fetchMachineEnvironment(row.machine_id);
             }
 
+            isSyncingUrlParams = true;
             apiForm.value = {
                 machine_id: row.machine_id,
                 name: row.name || "",
@@ -1721,6 +1787,7 @@ const app = createApp({
             } else {
                 apiParamsList.value = [{ enabled: true, key: "", value: "", description: "" }];
             }
+            setTimeout(() => { isSyncingUrlParams = false; }, 200);
 
             // 恢复 Headers (分离系统默认请求头与用户自定义请求头)
             systemDefaultHeaders.value = createDefaultHeaders();
@@ -2026,6 +2093,16 @@ const app = createApp({
                     }
                 }
 
+                // 提示脚本异常
+                if (res.data.script_error) {
+                    ElementPlus.ElNotification({
+                        title: "脚本执行异常警告",
+                        message: `前置/后置脚本执行报错: ${res.data.script_error}`,
+                        type: "warning",
+                        duration: 8000
+                    });
+                }
+
                 if (res.data.assertions_summary && res.data.assertions_summary.total > 0 && !res.data.assertions_summary.all_passed) {
                     apiResponseTab.value = "assertions";
                     ElementPlus.ElMessage.warning(`调试完成: 状态码 ${res.data.status_code || '异常'}，但有 ${res.data.assertions_summary.total - res.data.assertions_summary.passed_count} 项后置断言未通过`);
@@ -2184,6 +2261,9 @@ const app = createApp({
                     });
                 }
                 await fetchData();
+                if (apiForm.value.machine_id) {
+                    await fetchMachineEnvironment(apiForm.value.machine_id);
+                }
             } catch (err) {
                 ElementPlus.ElMessage.error("探测失败: " + (err.response?.data?.detail || err.message));
             } finally {

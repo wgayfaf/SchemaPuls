@@ -668,7 +668,7 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         auth_token = data.auth_config.get("token")
 
     from app.services.template_engine import (
-        parse_params_to_dict, parse_headers_to_dict, render_macro_string
+        parse_params_to_dict, parse_headers_to_dict, render_macro_string, resolve_path_variables
     )
 
     req_headers = parse_headers_to_dict(data.http_headers, auth_token=auth_token)
@@ -683,13 +683,22 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
             b64_val = base64.b64encode(f"{u}:{p}".encode()).decode()
             if "authorization" not in [k.lower() for k in req_headers]:
                 req_headers["Authorization"] = f"Basic {b64_val}"
+    elif data.auth_type == "custom_header":
+        hk = (data.auth_config or {}).get("header_key", "").strip()
+        hv = (data.auth_config or {}).get("header_value", "")
+        if hk and hk.lower() not in [k.lower() for k in req_headers]:
+            req_headers[hk] = hv
 
-    req_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
+    raw_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
     rendered_body = render_macro_string(data.http_body, auth_token=auth_token) if data.http_body else None
 
     rendered_path = render_macro_string(data.http_path, auth_token=auth_token)
     if not rendered_path.startswith("/"):
         rendered_path = "/" + rendered_path
+
+    # 解析并替换路径参数 (如 /detail/{tableId} 或 /detail/:tableId)
+    # 将已被替换进路径的参数从 req_params 中剔除，防止被拼接成查询字符串
+    rendered_path, req_params = resolve_path_variables(rendered_path, raw_params, env_vars)
 
     # 执行【前置操作 (Pre-request Actions)】
     from app.services.action_engine import execute_pre_actions, execute_post_actions
@@ -702,6 +711,9 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         auth_token=auth_token,
         environment_variables=env_vars
     )
+
+    # 前置操作若动态生成了变量或修改了参数，进行二次路径变量安全兜底解析
+    final_path, final_params = resolve_path_variables(final_path, final_params, variables)
 
     if not final_path.startswith("/"):
         final_path = "/" + final_path
@@ -753,9 +765,11 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
     all_updated_env.update(pre_updated_env)
     all_updated_env.update(post_updated_env)
     if all_updated_env and env:
+        from sqlalchemy.orm.attributes import flag_modified
         current_vars = dict(env.variables or {})
         current_vars.update(all_updated_env)
         env.variables = current_vars
+        flag_modified(env, "variables")
         session.add(env)
         session.commit()
         session.refresh(env)
@@ -788,7 +802,9 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         "resolved_url": url,
         "rendered_headers": final_headers,
         "rendered_params": final_params,
-        "rendered_body": final_body
+        "rendered_body": final_body,
+        "script_error": variables.get("_script_error"),
+        "console_logs": variables.get("_console_logs", [])
     }
 
 

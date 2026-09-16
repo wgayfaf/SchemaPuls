@@ -64,22 +64,108 @@ def _parse_postman_script(script_obj: Any) -> str:
         return exec_content
     return ""
 
-def _extract_requests_from_items(items: List[Dict[str, Any]], folder_prefix: str = "", machine_base_url: Optional[str] = None) -> List[Dict[str, Any]]:
-    """递归提取 Postman item 树下的所有 HTTP requests"""
+
+def _parse_postman_auth(auth_obj: Optional[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    """
+    解析 Postman/Apifox 导出的鉴权配置
+    返回: (auth_type: str, auth_config: Dict[str, Any])
+    """
+    if not auth_obj or not isinstance(auth_obj, dict):
+        return "none", {}
+        
+    auth_type_raw = str(auth_obj.get("type", "")).lower()
+    if not auth_type_raw or auth_type_raw == "noauth":
+        return "none", {}
+        
+    if auth_type_raw == "bearer":
+        bearer_list = auth_obj.get("bearer", [])
+        token_val = ""
+        if isinstance(bearer_list, list):
+            for item in bearer_list:
+                if isinstance(item, dict) and item.get("key") == "token":
+                    token_val = str(item.get("value", ""))
+        elif isinstance(bearer_list, dict):
+            token_val = str(bearer_list.get("token", ""))
+        return "bearer", {"token": token_val}
+        
+    elif auth_type_raw == "basic":
+        basic_list = auth_obj.get("basic", [])
+        u, p = "", ""
+        if isinstance(basic_list, list):
+            for item in basic_list:
+                if isinstance(item, dict):
+                    if item.get("key") == "username":
+                        u = str(item.get("value", ""))
+                    elif item.get("key") == "password":
+                        p = str(item.get("value", ""))
+        elif isinstance(basic_list, dict):
+            u = str(basic_list.get("username", ""))
+            p = str(basic_list.get("password", ""))
+        return "basic", {"username": u, "password": p}
+        
+    elif auth_type_raw == "apikey":
+        apikey_list = auth_obj.get("apikey", [])
+        in_loc, key_name, val = "", "", ""
+        if isinstance(apikey_list, list):
+            for item in apikey_list:
+                if isinstance(item, dict):
+                    k = item.get("key")
+                    v = str(item.get("value", ""))
+                    if k == "in":
+                        in_loc = v.lower()
+                    elif k == "key":
+                        key_name = v
+                    elif k == "value":
+                        val = v
+        elif isinstance(apikey_list, dict):
+            in_loc = str(apikey_list.get("in", "")).lower()
+            key_name = str(apikey_list.get("key", ""))
+            val = str(apikey_list.get("value", ""))
+            
+        if key_name.lower() == "authorization" and val.lower().startswith("bearer "):
+            return "bearer", {"token": val[7:].strip()}
+        elif key_name:
+            return "custom_header", {"header_key": key_name, "header_value": val}
+            
+    return "none", {}
+
+
+def _extract_requests_from_items(
+    items: List[Dict[str, Any]],
+    folder_prefix: str = "",
+    machine_base_url: Optional[str] = None,
+    inherited_auth: Optional[Tuple[str, Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
+    """递归提取 Postman item 树下的所有 HTTP requests (支持多级目录鉴权继承与路径参数提取)"""
     extracted_apis = []
     
     for it in items:
         name = (it.get("name") or "").strip()
         full_name = f"{folder_prefix} / {name}" if folder_prefix else name
         
+        # 解析当前 item / 文件夹自身的 auth 配置
+        current_auth = inherited_auth or ("none", {})
+        if "auth" in it and isinstance(it["auth"], dict) and it["auth"]:
+            parsed_item_auth = _parse_postman_auth(it["auth"])
+            if parsed_item_auth[0] != "none":
+                current_auth = parsed_item_auth
+
         # 1. 如果包含子 item 列表，代表是文件夹/分组，递归处理
         if "item" in it and isinstance(it["item"], list):
-            extracted_apis.extend(_extract_requests_from_items(it["item"], full_name, machine_base_url))
+            extracted_apis.extend(_extract_requests_from_items(it["item"], full_name, machine_base_url, current_auth))
         
         # 2. 如果包含 request，代表是具体接口
         elif "request" in it and isinstance(it["request"], dict):
             req = it["request"]
             method = (req.get("method") or "GET").upper()
+            
+            # 解析鉴权配置：优先使用接口自身的 request.auth，若无则继承父级文件夹 auth
+            req_auth = ("none", {})
+            if "auth" in req and isinstance(req["auth"], dict) and req["auth"]:
+                req_auth = _parse_postman_auth(req["auth"])
+            if req_auth[0] == "none":
+                req_auth = current_auth
+            auth_type, auth_config = req_auth
             
             # 解析 URL
             url_obj = req.get("url", {})
@@ -90,6 +176,21 @@ def _extract_requests_from_items(items: List[Dict[str, Any]], folder_prefix: str
                 raw_url = url_obj
             elif isinstance(url_obj, dict):
                 raw_url = url_obj.get("raw", "")
+                
+                # 1. 优先提取 Path Variables (路径参数，如 url.variable: [{key: 'tableId', value: 'tbl_Hy'}])
+                for v in url_obj.get("variable", []):
+                    if isinstance(v, dict) and v.get("key"):
+                        v_key = str(v.get("key", "")).strip()
+                        v_val = str(v.get("value", ""))
+                        v_desc = str(v.get("description", "")) or "路径参数 (Path Variable)"
+                        query_list.append({
+                            "enabled": not v.get("disabled", False),
+                            "key": v_key,
+                            "value": v_val,
+                            "description": v_desc
+                        })
+
+                # 2. 提取 Query Params (查询参数)
                 for q in url_obj.get("query", []):
                     if isinstance(q, dict) and q.get("key"):
                         query_list.append({
@@ -101,6 +202,8 @@ def _extract_requests_from_items(items: List[Dict[str, Any]], folder_prefix: str
             
             # 清理出相对路径
             http_path = _clean_relative_path(raw_url, machine_base_url)
+            # 将 Postman 风格的 :param 规范化为 OpenAPI/Apifox 习惯的 {param}
+            http_path = re.sub(r':([a-zA-Z0-9_]+)', r'{\1}', http_path)
             
             # 解析 Headers
             headers_list = []
@@ -181,6 +284,8 @@ def _extract_requests_from_items(items: List[Dict[str, Any]], folder_prefix: str
                 "http_headers": headers_list,
                 "http_body_type": http_body_type,
                 "http_body": http_body,
+                "auth_type": auth_type,
+                "auth_config": auth_config,
                 "pre_actions": pre_actions,
                 "post_actions": post_actions,
                 "expected_schema": {}
@@ -243,7 +348,8 @@ def parse_postman_package(file_bytes: bytes, filename: str = "", machine_base_ur
                         elif "info" in doc and "item" in doc:
                             result["collection_name"] = doc.get("info", {}).get("name", "Postman集合")
                             effective_base = result["base_url"] or machine_base_url
-                            apis = _extract_requests_from_items(doc.get("item", []), "", effective_base)
+                            root_auth = _parse_postman_auth(doc.get("auth"))
+                            apis = _extract_requests_from_items(doc.get("item", []), "", effective_base, root_auth)
                             result["apis"].extend(apis)
                     except json.JSONDecodeError:
                         continue
@@ -266,7 +372,8 @@ def parse_postman_package(file_bytes: bytes, filename: str = "", machine_base_ur
                         result["environment_variables"][k] = val
             elif "info" in doc and "item" in doc:
                 result["collection_name"] = doc.get("info", {}).get("name", "Postman集合")
-                apis = _extract_requests_from_items(doc.get("item", []), "", machine_base_url)
+                root_auth = _parse_postman_auth(doc.get("auth"))
+                apis = _extract_requests_from_items(doc.get("item", []), "", machine_base_url, root_auth)
                 result["apis"].extend(apis)
             else:
                 raise ValueError("未检测到标准的 Postman Collection (集合) 或 Environment (环境) 结构")
@@ -368,6 +475,8 @@ def import_postman_to_machine(
         target_probe.http_headers = api_data.get("http_headers", [])
         target_probe.http_body_type = api_data.get("http_body_type", "none")
         target_probe.http_body = api_data.get("http_body", "")
+        target_probe.auth_type = api_data.get("auth_type", "none")
+        target_probe.auth_config = api_data.get("auth_config", {})
         target_probe.pre_actions = api_data.get("pre_actions", [])
         target_probe.post_actions = api_data.get("post_actions", [])
         target_probe.expected_schema = api_data.get("expected_schema", {})

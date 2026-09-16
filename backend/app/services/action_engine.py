@@ -78,19 +78,21 @@ def get_nested_value(data: Any, path: str) -> Tuple[bool, Any]:
 
 
 def render_with_variables(text_val: Optional[str], variables: Dict[str, Any], auth_token: Optional[str] = None) -> Optional[str]:
-    """结合上下文变量与内置宏对文本进行全面插值"""
+    """结合上下文变量与内置宏对文本进行全面插值 (支持 {{var}} 及带空格的 {{ var }})"""
     if text_val is None or not isinstance(text_val, str):
         return text_val
 
     # 1. 基础时间戳/UUID/随机数宏替换
     result = render_macro_string(text_val, auth_token=auth_token)
 
-    # 2. 上下文变量插值: {{var_name}}
+    # 2. 上下文变量插值: {{var_name}}，支持可选的首尾空格
     if variables:
         for k, v in variables.items():
-            pattern = f"{{{{{k}}}}}"
-            if pattern in result:
-                result = result.replace(pattern, str(v) if v is not None else "")
+            if not k or str(k).startswith("_"):
+                continue
+            str_val = str(v) if v is not None else ""
+            pattern = re.compile(r'\{\{\s*' + re.escape(str(k)) + r'\s*\}\}')
+            result = pattern.sub(str_val, result)
 
     return result
 
@@ -249,6 +251,7 @@ def run_quickjs_pre_script(
         setup_quickjs_runtime(ctx, script_code)
 
         setup_js = f"""
+        var _initial_global_keys = Object.keys(globalThis);
         var environment = {json.dumps(environment_variables or {}, ensure_ascii=False)};
         var updated_env = {{}};
         var variables = Object.assign({{}}, environment, {json.dumps(variables, ensure_ascii=False)});
@@ -267,7 +270,12 @@ def run_quickjs_pre_script(
         }};
         var pm = {{
             variables: {{
-                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    variables[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
                 get: function(k) {{ return variables[String(k)]; }}
             }},
             environment: {{
@@ -284,11 +292,21 @@ def run_quickjs_pre_script(
                 }}
             }},
             globals: {{
-                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    variables[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
                 get: function(k) {{ return variables[String(k)]; }}
             }},
             collectionVariables: {{
-                set: function(k, v) {{ variables[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    variables[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
                 get: function(k) {{ return variables[String(k)]; }}
             }},
             request: {{
@@ -340,9 +358,28 @@ def run_quickjs_pre_script(
         }};
         """
         ctx.eval(setup_js)
-        ctx.eval(script_code)
+        try:
+            ctx.eval(script_code)
+        except Exception as eval_err:
+            err_str = str(eval_err)
+            if "invalid redefinition" in err_str or "SyntaxError" in err_str:
+                relaxed_code = re.sub(r'\b(const|let)\s+', 'var ', script_code)
+                ctx.eval(relaxed_code)
+            else:
+                raise
 
-        result_raw = ctx.eval("JSON.stringify({ variables: variables, updated_env: updated_env, headers: headers, params: params, request: request, logs: _console_logs })")
+        extract_js = """
+        var _new_globals = {};
+        Object.keys(globalThis).forEach(function(k) {
+            if (_initial_global_keys.indexOf(k) === -1 && typeof globalThis[k] !== 'function' && ['setup_js', 'extract_js', 'variables', 'updated_env', '_console_logs', '_initial_global_keys', '_new_globals', 'headers', 'params', 'request', 'environment', 'pm', 'console'].indexOf(k) === -1) {
+                _new_globals[k] = globalThis[k];
+            }
+        });
+        Object.assign(variables, _new_globals);
+        Object.assign(updated_env, _new_globals);
+        JSON.stringify({ variables: variables, updated_env: updated_env, headers: headers, params: params, request: request, logs: _console_logs })
+        """
+        result_raw = ctx.eval(extract_js)
         res_dict = json.loads(result_raw)
 
         new_vars = dict(res_dict.get("variables") or {})
@@ -391,6 +428,7 @@ def run_quickjs_post_script(
         setup_quickjs_runtime(ctx, script_code)
 
         setup_js = f"""
+        var _initial_global_keys = Object.keys(globalThis);
         var status_code = {json.dumps(status_code)};
         var latency_ms = {json.dumps(latency_ms)};
         var response_data = {json.dumps(response_data, ensure_ascii=False)};
@@ -474,7 +512,12 @@ def run_quickjs_post_script(
                 }}
             }},
             variables: {{
-                set: function(k, v) {{ extracted_vars[String(k)] = (v !== undefined && v !== null) ? v : ""; }},
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    extracted_vars[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
                 get: function(k) {{
                     if (extracted_vars[String(k)] !== undefined) return extracted_vars[String(k)];
                     if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
@@ -494,13 +537,60 @@ def run_quickjs_post_script(
                     if (environment[String(k)] !== undefined) return environment[String(k)];
                     return context_variables[String(k)];
                 }}
+            }},
+            globals: {{
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    extracted_vars[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
+                get: function(k) {{
+                    if (extracted_vars[String(k)] !== undefined) return extracted_vars[String(k)];
+                    if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
+                    if (environment[String(k)] !== undefined) return environment[String(k)];
+                    return context_variables[String(k)];
+                }}
+            }},
+            collectionVariables: {{
+                set: function(k, v) {{
+                    var val = (v !== undefined && v !== null) ? v : "";
+                    extracted_vars[String(k)] = val;
+                    environment[String(k)] = val;
+                    updated_env[String(k)] = val;
+                }},
+                get: function(k) {{
+                    if (extracted_vars[String(k)] !== undefined) return extracted_vars[String(k)];
+                    if (updated_env[String(k)] !== undefined) return updated_env[String(k)];
+                    if (environment[String(k)] !== undefined) return environment[String(k)];
+                    return context_variables[String(k)];
+                }}
             }}
         }};
         """
         ctx.eval(setup_js)
-        ctx.eval(script_code)
+        try:
+            ctx.eval(script_code)
+        except Exception as eval_err:
+            err_str = str(eval_err)
+            if "invalid redefinition" in err_str or "SyntaxError" in err_str:
+                relaxed_code = re.sub(r'\b(const|let)\s+', 'var ', script_code)
+                ctx.eval(relaxed_code)
+            else:
+                raise
 
-        result_raw = ctx.eval("JSON.stringify({ assertions: assertions, extracted_vars: extracted_vars, updated_env: updated_env, logs: _console_logs })")
+        extract_js = """
+        var _new_globals = {};
+        Object.keys(globalThis).forEach(function(k) {
+            if (_initial_global_keys.indexOf(k) === -1 && typeof globalThis[k] !== 'function' && ['setup_js', 'extract_js', 'assertions', 'extracted_vars', 'updated_env', '_console_logs', '_initial_global_keys', '_new_globals', 'resp_headers', 'response_data', 'response_text', 'context_variables', 'environment', 'pm', 'console', 'status_code', 'latency_ms'].indexOf(k) === -1) {
+                _new_globals[k] = globalThis[k];
+            }
+        });
+        Object.assign(extracted_vars, _new_globals);
+        Object.assign(updated_env, _new_globals);
+        JSON.stringify({ assertions: assertions, extracted_vars: extracted_vars, updated_env: updated_env, logs: _console_logs })
+        """
+        result_raw = ctx.eval(extract_js)
         res_dict = json.loads(result_raw)
         extracted = dict(res_dict.get("extracted_vars") or {})
         updated_env = dict(res_dict.get("updated_env") or {})
@@ -565,6 +655,8 @@ def execute_pre_actions(
         if act_type == "set_variable":
             if key:
                 variables[key] = val_str
+                updated_env_vars[key] = val_str
+                env_vars[key] = val_str
         elif act_type == "inject_header":
             if key:
                 req_headers[key] = val_str
@@ -594,6 +686,8 @@ def execute_pre_actions(
             script_code = action.get("value", "") or action.get("script", "")
             if script_code and isinstance(script_code, str):
                 orig_env_snapshot = dict(env_vars)
+                orig_vars_snapshot = dict(variables)
+                initial_keys = {"variables", "environment", "headers", "params", "body", "path", "time", "uuid", "random", "json"}
                 local_scope = {
                     "variables": variables,
                     "environment": env_vars,
@@ -616,13 +710,24 @@ def execute_pre_actions(
                         req_body = local_scope["body"]
                     if "path" in local_scope:
                         req_path = local_scope["path"]
-                    # 检测 Python 脚本对 environment 的修改
+                    # 检测 Python 脚本对 environment 和 variables 的修改
                     if "environment" in local_scope and isinstance(local_scope["environment"], dict):
                         for ek, ev in local_scope["environment"].items():
                             if ek not in orig_env_snapshot or orig_env_snapshot[ek] != ev:
                                 updated_env_vars[ek] = ev
                                 variables[ek] = ev
                                 env_vars[ek] = ev
+                    if "variables" in local_scope and isinstance(local_scope["variables"], dict):
+                        for vk, vv in local_scope["variables"].items():
+                            if vk not in orig_vars_snapshot or orig_vars_snapshot[vk] != vv:
+                                updated_env_vars[vk] = vv
+                                env_vars[vk] = vv
+                    # 关键增强：自动捕获 Python 脚本中直接赋值的新变量 (如 token = "123")
+                    for k, v in local_scope.items():
+                        if k not in initial_keys and not k.startswith("_") and not callable(v):
+                            updated_env_vars[k] = v
+                            variables[k] = v
+                            env_vars[k] = v
                 except Exception as e:
                     variables["_script_error"] = str(e)
 

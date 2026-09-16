@@ -25,7 +25,8 @@ from app.services.template_engine import (
     render_macro_string,
     render_template_value,
     parse_params_to_dict,
-    parse_headers_to_dict
+    parse_headers_to_dict,
+    resolve_path_variables
 )
 from app.services.action_engine import (
     execute_pre_actions,
@@ -482,17 +483,24 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             b64_val = base64.b64encode(f"{u}:{p}".encode()).decode()
             if "authorization" not in [k.lower() for k in req_headers]:
                 req_headers["Authorization"] = f"Basic {b64_val}"
+    elif api_auth_type == "custom_header":
+        hk = (api_auth_config or {}).get("header_key", "").strip()
+        hv = (api_auth_config or {}).get("header_value", "")
+        if hk and hk.lower() not in [k.lower() for k in req_headers]:
+            req_headers[hk] = hv
 
     # 组装与渲染动态 Params
-    req_params = parse_params_to_dict(api_http_params, auth_token=auth_token)
+    raw_params = parse_params_to_dict(api_http_params, auth_token=auth_token)
 
     # 组装与渲染动态 Body
     rendered_body = render_macro_string(api_http_body, auth_token=auth_token) if api_http_body else None
 
-    # 路径渲染预处理
+    # 路径渲染预处理与路径参数解析
     rendered_path = render_macro_string(api_http_path, auth_token=auth_token)
     if not rendered_path.startswith("/"):
         rendered_path = "/" + rendered_path
+
+    rendered_path, req_params = resolve_path_variables(rendered_path, raw_params, env_variables)
 
     # 执行【前置操作 (Pre-request Actions)】：动态变量、请求头注入、参数注入及前置脚本
     final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
@@ -504,6 +512,9 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         auth_token=auth_token,
         environment_variables=env_variables
     )
+
+    # 前置操作若动态生成了变量或修改了参数，进行二次路径变量安全兜底解析
+    final_path, final_params = resolve_path_variables(final_path, final_params, variables)
 
     if not final_path.startswith("/"):
         final_path = "/" + final_path
@@ -561,12 +572,14 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
     all_updated_env.update(post_updated_env)
     if all_updated_env and env_id:
         try:
+            from sqlalchemy.orm.attributes import flag_modified
             with Session(engine) as session:
                 env_record = session.get(Environment, env_id)
                 if env_record:
                     curr_vars = dict(env_record.variables or {})
                     curr_vars.update(all_updated_env)
                     env_record.variables = curr_vars
+                    flag_modified(env_record, "variables")
                     session.add(env_record)
                     session.commit()
         except Exception as env_err:

@@ -2,7 +2,7 @@ import re
 import time
 import uuid
 import random
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 
 def render_macro_string(template: str, auth_token: Optional[str] = None) -> str:
@@ -82,3 +82,57 @@ def parse_headers_to_dict(headers_data: Union[Dict[str, str], List[Dict[str, Any
                 result[str(k)] = render_macro_string(str(v), auth_token)
 
     return result
+
+
+def resolve_path_variables(
+    path: str,
+    params_dict: Optional[Dict[str, str]] = None,
+    variables: Optional[Dict[str, Any]] = None
+) -> Tuple[str, Dict[str, str]]:
+    """
+    解析并替换路径参数 (Path Variables, 如 /detail/{tableId} 或 /detail/:tableId)
+    支持从 params_dict 及全局 variables (环境变量/上下文) 中提取对应键值进行原地插值替换。
+    将已用于路径替换的 params 剔除，返回 (resolved_path, remaining_query_params)
+    """
+    if not path:
+        return path or "", dict(params_dict or {})
+        
+    resolved_path = path
+    remaining_params = dict(params_dict or {})
+    
+    # 1. 优先使用 params_dict 替换路径参数
+    if params_dict:
+        for k, v in params_dict.items():
+            if not k:
+                continue
+            k_str = str(k).strip()
+            curly_pattern = r'\{\s*' + re.escape(k_str) + r'\s*\}'
+            colon_pattern = r':' + re.escape(k_str) + r'\b'
+            
+            replaced = False
+            if re.search(curly_pattern, resolved_path):
+                resolved_path = re.sub(curly_pattern, str(v) if v is not None else "", resolved_path)
+                replaced = True
+            elif re.search(colon_pattern, resolved_path):
+                resolved_path = re.sub(colon_pattern, str(v) if v is not None else "", resolved_path)
+                replaced = True
+                
+            if replaced:
+                remaining_params.pop(k, None)
+                
+    # 2. 如果还有未替换的路径变量，尝试从 variables (环境变量/前置脚本变量) 中查找
+    if variables:
+        for k, v in variables.items():
+            if not k or str(k).startswith("_"):
+                continue
+            k_str = str(k).strip()
+            curly_pattern = r'\{\s*' + re.escape(k_str) + r'\s*\}'
+            colon_pattern = r':' + re.escape(k_str) + r'\b'
+            if re.search(curly_pattern, resolved_path):
+                resolved_path = re.sub(curly_pattern, str(v) if v is not None else "", resolved_path)
+            elif re.search(colon_pattern, resolved_path):
+                resolved_path = re.sub(colon_pattern, str(v) if v is not None else "", resolved_path)
+                
+    return resolved_path, remaining_params
+
+
