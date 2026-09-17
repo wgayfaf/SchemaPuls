@@ -77,25 +77,6 @@ python start_all.py
 
 ---
 
-## 🧪 自动化测试套件
-
-项目在 `tests/` 目录内置了覆盖各核心子系统的端到端自动化测试：
-```bash
-# 验证四层拓扑、解耦探测、熔断短路与批量克隆
-python tests/verify_hierarchical.py
-
-# 验证机器主机(Ping) + 端口(TCP) 双阶段探活
-python tests/verify_dual_probe.py
-
-# 验证前置与后置操作 (Pre/Post Actions) 及动态环境变量
-python tests/verify_pre_post_actions.py
-
-# 验证 Postman 导入与解析引擎
-python tests/verify_postman_import.py
-```
-
----
-
 ## 📂 项目工程目录结构
 
 ```
@@ -129,14 +110,8 @@ SchemaPulse/
 │   │   ├── composables/           # 领域状态与逻辑 (core/targets/env/machines/apis/postman/lab)
 │   │   ├── workbench.js           # 编排层 (状态装配与生命周期)
 │   │   └── style.css              # 深色运维仪表盘定制样式
-│   └── legacy/                    # 旧版 CDN 免构建版本 (保留可用，逐步废弃)
 ├── scripts/
-│   ├── start_all.py               # 跨平台一键前后端守护启动脚本
-│   └── standalone_probe.py        # 独立最小化探活脚本
-├── tests/                         # 自动化回归测试套件
-│   ├── verify_hierarchical.py     # 四层架构与熔断全流程验证
-│   ├── verify_dual_probe.py       # Ping + TCP 双重探活验证
-│   └── ...                        # 其他专项测试脚本
+│   └── start_all.py               # 跨平台一键前后端守护启动脚本
 ├── .gitignore                     # Git 忽略配置文件
 ├── 技术选型与实现方案.md            # 技术选型论证与实现方案规范
 ├── 系统架构设计文档.md              # 系统全景分层、UML类图、ERD与流程时序

@@ -7,8 +7,7 @@
     "dev": "vite",
     "start": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "legacy": "python legacy/run.py"
+    "preview": "vite preview"
   },
   "dependencies": {
     "axios": "^1.6.8",
