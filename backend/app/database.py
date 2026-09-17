@@ -78,6 +78,12 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+        # smtp_config 表新增邮件告警总开关列
+        try:
+            conn.execute(text("ALTER TABLE smtp_config ADD COLUMN smtp_enabled BOOL DEFAULT 1"))
+            conn.commit()
+        except Exception:
+            pass
 
         env_columns_to_add = [
             ("base_url", "VARCHAR(255)"),

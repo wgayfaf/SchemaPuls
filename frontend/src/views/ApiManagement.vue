@@ -86,9 +86,10 @@
                                 </el-input>
                             </div>
                             <div style="display: flex; gap: 10px;">
-                                <el-button size="small" type="primary" plain @click="fetchData">
-                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新
-                                </el-button>
+<!--                              直接注释掉这个刷新，这个位置的刷新和top的重复了，但没有去修改对应的函数，只是在前端不显示-->
+<!--                                <el-button size="small" type="primary" plain @click="fetchData">-->
+<!--                                    <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px;"></i>刷新-->
+<!--                                </el-button>-->
                                 <el-button size="small" type="warning" plain @click="openGenericPostmanImport">
                                     <i class="fa-solid fa-file-import" style="margin-right: 4px;"></i>导入 Postman 接口
                                 </el-button>

@@ -64,17 +64,18 @@
                             <i class="fa-solid fa-envelope-open-text menu-icon" style="color: #10b981;"></i>
                             <span>SMTP 告警配置</span>
                         </el-menu-item>
-                        <el-menu-item index="docs">
-                            <i class="fa-solid fa-book-open menu-icon" style="color: #6366f1;"></i>
-                            <span>Swagger API 文档</span>
-                        </el-menu-item>
+<!--                      只对前端界面进行了隐藏，接口从3000跳转到8000/docs功能依旧纯在-->
+<!--                        <el-menu-item index="docs">-->
+<!--                            <i class="fa-solid fa-book-open menu-icon" style="color: #6366f1;"></i>-->
+<!--                            <span>Swagger API 文档</span>-->
+<!--                        </el-menu-item>-->
                     </el-sub-menu>
                 </el-menu>
             </div>
 
             <div class="sidebar-footer">
                 <div><span class="pulse-indicator"></span>引擎在线中</div>
-                <div>v1.0.0</div>
+                <div>v1.0.1</div>
             </div>
         </aside>
 
@@ -98,9 +99,9 @@
                         style="font-size: 11.5px; color: #64748b; margin-right: 8px; display: inline-flex; align-items: center;">
                         <i class="fa-regular fa-clock" style="margin-right: 4px;"></i>上次同步: {{ lastRefreshTime }}
                     </span>
-                    <el-button type="info" size="small" text @click="openDocs">
-                        <i class="fa-solid fa-book-open" style="margin-right: 6px;"></i>Swagger 接口
-                    </el-button>
+<!--                    <el-button type="info" size="small" text @click="openDocs">-->
+<!--                        <i class="fa-solid fa-book-open" style="margin-right: 6px;"></i>Swagger 接口-->
+<!--                    </el-button>-->
                     <el-button type="primary" size="small" plain @click="handleManualRefresh" :loading="loading">
                         <i class="fa-solid fa-arrows-rotate" :class="{ 'fa-spin': loading }"
                             style="margin-right: 6px;"></i>刷新

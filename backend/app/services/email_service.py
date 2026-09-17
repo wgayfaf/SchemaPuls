@@ -30,6 +30,7 @@ def get_smtp_config() -> Dict[str, Any]:
                 "user": row.smtp_user,
                 "password": row.smtp_password,
                 "use_ssl": row.smtp_use_ssl,
+                "enabled": row.smtp_enabled,
                 "receivers": list(row.alert_receivers or []),
                 "source": "database"
             }
@@ -39,6 +40,7 @@ def get_smtp_config() -> Dict[str, Any]:
         "user": SMTP_USER,
         "password": SMTP_PASSWORD,
         "use_ssl": SMTP_USE_SSL,
+        "enabled": True,
         "receivers": [],
         "source": "environment"
     }
@@ -165,8 +167,12 @@ def _send_smtp_sync(receivers: List[str], subject: str, html_body: str):
 
 
 async def send_email_notification(receivers: List[str], subject: str, html_body: str):
-    """异步非阻塞邮件发送入口"""
+    """异步非阻塞邮件发送统一入口: 邮件告警总开关在此拦截"""
     if not receivers:
+        return
+    cfg = get_smtp_config()
+    if not cfg["enabled"]:
+        print(f"\n[邮件告警] 总开关已关闭，跳过发送 (主题: {subject})")
         return
     try:
         # 使用线程池发送邮件，避免阻塞 asyncio 调度事件循环

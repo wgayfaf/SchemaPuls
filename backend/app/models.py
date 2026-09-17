@@ -197,5 +197,6 @@ class SmtpConfig(SQLModel, table=True):
     smtp_user: str = Field(default="")
     smtp_password: str = Field(default="")
     smtp_use_ssl: bool = Field(default=True)
+    smtp_enabled: bool = Field(default=True)   # 邮件告警总开关
     alert_receivers: List[str] = Field(default=[], sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=datetime.utcnow)

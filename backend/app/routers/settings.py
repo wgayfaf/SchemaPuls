@@ -18,6 +18,7 @@ class SmtpConfigPayload(BaseModel):
     smtp_user: str = ""
     smtp_password: Optional[str] = ""   # 为空表示保留已保存的密码
     smtp_use_ssl: bool = True
+    smtp_enabled: bool = True           # 邮件告警总开关
     alert_receivers: List[str] = []     # 全局告警收件人 (机器未单独填写时使用)
 
 
@@ -35,6 +36,7 @@ def get_smtp_settings(session: Session = Depends(get_session)):
             "smtp_port": row.smtp_port,
             "smtp_user": row.smtp_user,
             "smtp_use_ssl": row.smtp_use_ssl,
+            "smtp_enabled": row.smtp_enabled,
             "alert_receivers": list(row.alert_receivers or []),
             "password_set": bool(row.smtp_password),
             "source": "database"
@@ -46,6 +48,7 @@ def get_smtp_settings(session: Session = Depends(get_session)):
         "smtp_port": env_cfg["port"],
         "smtp_user": env_cfg["user"],
         "smtp_use_ssl": env_cfg["use_ssl"],
+        "smtp_enabled": True,
         "alert_receivers": env_cfg["receivers"],
         "password_set": bool(env_cfg["password"]),
         "source": env_cfg["source"]
@@ -64,6 +67,7 @@ def update_smtp_settings(payload: SmtpConfigPayload, session: Session = Depends(
     if payload.smtp_password:  # 仅在填写了新密码时覆盖
         row.smtp_password = payload.smtp_password
     row.smtp_use_ssl = payload.smtp_use_ssl
+    row.smtp_enabled = payload.smtp_enabled
     row.alert_receivers = [r.strip() for r in payload.alert_receivers if r.strip()]
     from datetime import datetime
     row.updated_at = datetime.utcnow()
@@ -76,6 +80,8 @@ def update_smtp_settings(payload: SmtpConfigPayload, session: Session = Depends(
 async def test_smtp_settings(payload: SmtpTestPayload, session: Session = Depends(get_session)):
     """发送测试邮件 (未指定收件人时发送到全局告警收件人)"""
     cfg = get_smtp_config()
+    if not cfg["enabled"]:
+        raise HTTPException(status_code=400, detail="邮件告警总开关已关闭，请先在上方开启")
     if not cfg["user"] or not cfg["password"]:
         raise HTTPException(status_code=400, detail="请先完整填写并保存 SMTP 账号与授权码")
     receiver = payload.receiver.strip()
