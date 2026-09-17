@@ -57,7 +57,7 @@
                                         </div>
                                     </div>
                                     <el-input v-model="labSchemaOutput" type="textarea" :rows="18" readonly
-                                        style="font-family: Consolas, Monaco, monospace; font-size: 12.5px;"
+                                        style="font-family: Consolas, Monaco, monospace; font-size: 12.5px;margin-top: 12px;"
                                         placeholder="点击左下方【执行 Schema 推导】后在此实时呈现生成的契约结构...">
                                     </el-input>
                                     <div style="margin-top: 14px; display: flex; justify-content: flex-end; gap: 10px;">
