@@ -1,0 +1,22 @@
+# 依赖与产物 (容器内重新安装/构建)
+node_modules
+frontend/node_modules
+frontend/dist
+.venv
+
+# 运行时数据 (通过卷挂载持久化, 不打进镜像)
+*.db
+*.db-wal
+*.db-shm
+backend/monitor.db.bak
+
+# 版本库与IDE
+.git
+.idea
+.vscode
+
+# 其它
+__pycache__
+**/__pycache__
+*.log
+tests

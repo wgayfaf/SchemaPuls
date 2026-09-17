@@ -3,7 +3,8 @@ from sqlalchemy import text
 import os
 
 DB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(DB_DIR, "monitor.db")
+# 支持通过环境变量指定数据库位置 (如 Docker 卷挂载), 默认沿用 backend/monitor.db
+DB_PATH = os.environ.get("SCHEMAPULSE_DB") or os.path.join(DB_DIR, "monitor.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 from sqlalchemy import text, event

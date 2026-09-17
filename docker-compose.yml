@@ -1,0 +1,12 @@
+services:
+  schemapulse:
+    build: .
+    container_name: schemapulse
+    ports:
+      - "8000:8000"
+    volumes:
+      - schemapulse-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  schemapulse-data:

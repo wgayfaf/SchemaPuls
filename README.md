@@ -75,6 +75,20 @@ python start_all.py
   cd frontend && npm run build
   ```
 
+### 4. Docker 一体化部署（可选）
+单容器包含前端静态文件 + 后端 API，一个端口（8000）即可访问全部功能：
+```bash
+# 构建镜像
+docker build -t schemapulse .
+
+# 运行 (数据持久化在命名卷 schemapulse-data)
+docker run -d --name schemapulse -p 8000:8000 -v schemapulse-data:/app/data schemapulse
+
+# 或使用 docker compose
+docker compose up -d
+```
+访问 `http://localhost:8000` 即为前端工作台，`http://localhost:8000/docs` 为 Swagger。
+
 ---
 
 ## 📂 项目工程目录结构

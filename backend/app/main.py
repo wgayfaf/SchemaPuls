@@ -10,6 +10,7 @@
   - targets.py       旧版平铺目标兼容层与大盘指标
   - postman.py       Postman 数据导入
 """
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -49,6 +50,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 容器/一体化部署模式: 若提供了已构建的前端静态目录, 则由后端直接托管 SPA (同源无跨域)
+# 开发模式 (未设置 FRONTEND_DIST) 不受影响, 前端仍由 Vite DevServer 独立服务
+_FRONTEND_DIST = os.environ.get("FRONTEND_DIST", "")
+
 # 挂载各领域路由
 app.include_router(topology.router)
 app.include_router(environments.router)
@@ -61,18 +66,19 @@ app.include_router(postman.router)
 app.include_router(settings.router)
 
 
-@app.get("/")
-def read_root():
-    """纯后端 API 根路径：返回服务运行元数据及前端服务指引"""
-    return {
-        "name": "SchemaPulse API Server",
-        "version": "2.0.0",
-        "status": "online",
-        "architecture": "Decoupled (Frontend & Backend Separated)",
-        "frontend_dev_url": "http://127.0.0.1:3000",
-        "api_docs_url": "/docs",
-        "redoc_url": "/redoc"
-    }
+if not _FRONTEND_DIST:
+    @app.get("/")
+    def read_root():
+        """纯后端 API 根路径：返回服务运行元数据及前端服务指引"""
+        return {
+            "name": "SchemaPulse API Server",
+            "version": "2.0.0",
+            "status": "online",
+            "architecture": "Decoupled (Frontend & Backend Separated)",
+            "frontend_dev_url": "http://127.0.0.1:3000",
+            "api_docs_url": "/docs",
+            "redoc_url": "/redoc"
+        }
 
 
 @app.get("/web")
@@ -80,3 +86,8 @@ def read_root():
 def get_web_console():
     """向后兼容路由：重定向至独立前端服务"""
     return RedirectResponse(url="http://127.0.0.1:3000")
+
+if _FRONTEND_DIST and os.path.isdir(_FRONTEND_DIST):
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="spa")
