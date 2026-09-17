@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import shutil
 import subprocess
 import requests
 
@@ -42,42 +43,44 @@ def test_decoupled_architecture():
         summary_data = resp_summary.json()
         print(f"[OK] [2/5] 业务 API (/api/dashboard/summary) 正常返回，监控目标数: {summary_data['total_targets']}")
 
-    # 3. 验证独立前端目录工程完整性
+    # 3. 验证独立前端 Vite 工程完整性 (新版工程化结构)
     required_frontend_files = [
         "index.html",
-        "config.js",
-        os.path.join("css", "style.css"),
-        os.path.join("js", "app.js"),
-        "run.py",
-        "package.json"
+        "vite.config.js",
+        "package.json",
+        os.path.join("src", "main.js"),
+        os.path.join("src", "App.vue"),
+        os.path.join("src", "workbench.js"),
+        os.path.join("src", "style.css"),
     ]
     for rel_path in required_frontend_files:
         full_path = os.path.join(frontend_dir, rel_path)
         assert os.path.exists(full_path), f"缺少前端工程核心文件: {rel_path}"
         assert os.path.getsize(full_path) > 0, f"前端文件为空: {rel_path}"
-    print(f"[OK] [3/5] 独立前端工程目录 (frontend/) 结构完整（含 CSS 样式抽离、JS 驱动、全局配置）")
+    print(f"[OK] [3/5] 独立前端 Vite 工程 (frontend/) 结构完整（含 App.vue、workbench.js、style.css）")
 
-    # 4. 验证前端全局配置与 Axios 跨域注入
-    with open(os.path.join(frontend_dir, "config.js"), "r", encoding="utf-8") as f:
-        config_code = f.read()
-        assert "API_BASE_URL" in config_code
-    with open(os.path.join(frontend_dir, "js", "app.js"), "r", encoding="utf-8") as f:
+    # 4. 验证 Axios 全局配置与 API 代理注入
+    with open(os.path.join(frontend_dir, "vite.config.js"), "r", encoding="utf-8") as f:
+        vite_code = f.read()
+        assert "127.0.0.1:8000" in vite_code
+        assert "proxy" in vite_code
+    with open(os.path.join(frontend_dir, "src", "workbench.js"), "r", encoding="utf-8") as f:
         js_code = f.read()
         assert "axios.defaults.baseURL" in js_code
-    print("[OK] [4/5] 前端 Axios 全局跨域 baseURL 与动态配置注入正常")
+    print("[OK] [4/5] 前端 Axios baseURL 与 Vite 开发代理配置正常")
 
-    # 5. 启动独立前端 DevServer 并发起 HTTP 请求探测 (3000 端口)
-    dev_server_path = os.path.join(frontend_dir, "run.py")
-    p_dev = subprocess.Popen([sys.executable, dev_server_path, "3001"], cwd=frontend_dir)
-    time.sleep(1.5)
+    # 5. 启动 Vite DevServer 并发起 HTTP 请求探测 (3000 端口)
+    npm_cmd = shutil.which("npm") or shutil.which("npm.cmd")
+    assert npm_cmd, "未找到 npm，请先安装 Node.js (>=18)"
+    p_dev = subprocess.Popen([npm_cmd, "run", "dev"], cwd=frontend_dir,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(6)
     try:
-        resp_fe = requests.get("http://127.0.0.1:3001/")
+        resp_fe = requests.get("http://127.0.0.1:3000/")
         assert resp_fe.status_code == 200
         assert "SchemaPulse" in resp_fe.text
-        assert "style.css" in resp_fe.text
-        assert "config.js" in resp_fe.text
-        assert resp_fe.headers.get("Access-Control-Allow-Origin") == "*"
-        print("[OK] [5/5] 前端独立 DevServer (Port: 3001) 托管验证 100% 成功！CORS 响应头与静态外链均正确")
+        assert "/src/main.js" in resp_fe.text
+        print("[OK] [5/5] 前端 Vite DevServer (Port: 3000) 托管验证 100% 成功！")
     finally:
         p_dev.terminate()
         p_dev.wait(timeout=3)

@@ -2,6 +2,7 @@ import subprocess
 import sys
 import os
 import time
+import shutil
 import signal
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +21,7 @@ def main():
     sys.stdout.flush()
 
     backend_script = os.path.join(ROOT_DIR, "backend", "run.py")
-    frontend_script = os.path.join(ROOT_DIR, "frontend", "run.py")
+    frontend_dir = os.path.join(ROOT_DIR, "frontend")
 
     processes = []
     try:
@@ -32,10 +33,18 @@ def main():
         processes.append(("后端 API 服务", p_backend))
         time.sleep(1.5)
 
-        # 2. 启动前端进程
+        # 2. 启动前端进程 (Vite DevServer，需要 Node.js >= 18)
+        npm_cmd = shutil.which("npm") or shutil.which("npm.cmd")
+        if not npm_cmd:
+            print("[错误] 未找到 npm 命令，请先安装 Node.js (https://nodejs.org)")
+            print("       也可手动进入 frontend/ 目录执行: npm install && npm run dev")
+            p_frontend.terminate()
+            for name, p in processes:
+                p.terminate()
+            return
         p_frontend = subprocess.Popen(
-            [PYTHON_EXE, frontend_script],
-            cwd=ROOT_DIR
+            [npm_cmd, "run", "dev"],
+            cwd=frontend_dir
         )
         processes.append(("前端独立控制台", p_frontend))
 

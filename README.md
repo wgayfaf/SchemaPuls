@@ -41,9 +41,14 @@
 
 ### 1. 环境准备
 * Python 3.11+ 或 3.12
-* 依赖库安装：
+* Node.js 18+ (前端 Vite 工程构建与开发)
+* 后端依赖库安装：
   ```bash
   pip install fastapi uvicorn httpx sqlmodel jsonschema genson apscheduler quickjs
+  ```
+* 前端依赖安装（首次）：
+  ```bash
+  cd frontend && npm install
   ```
 
 ### 2. 一键启动服务 (推荐)
@@ -61,9 +66,13 @@ python start_all.py
   ```bash
   python backend/run.py
   ```
-* **仅启动前端服务**（监听 3000 端口）：
+* **仅启动前端服务**（Vite DevServer，监听 3000 端口）：
   ```bash
-  python frontend/run.py
+  cd frontend && npm run dev
+  ```
+* **构建前端生产包**（产出 `frontend/dist/`）：
+  ```bash
+  cd frontend && npm run build
   ```
 
 ---
@@ -97,7 +106,9 @@ SchemaPulse/
 │   └── app/
 │       ├── database.py            # SQLite 连接配置、PRAGMA WAL 调优与自动迁移
 │       ├── models.py              # 四层资产模型与历史流水表结构定义
-│       ├── main.py                # FastAPI 路由、拓扑树聚合与 RESTful API
+│       ├── main.py                # FastAPI 应用入口 (生命周期、CORS、路由挂载)
+│       ├── routers/               # 按领域拆分的 RESTful 路由 (机器/接口/环境/工具等)
+│       ├── schemas/               # Pydantic 请求模型 (按领域拆分)
 │       └── services/
 │           ├── probe_service.py   # 核心探活引擎 (Ping/TCP/HTTP/熔断守卫/契约比对)
 │           ├── action_engine.py   # QuickJS 动态沙箱、pm.* 注入与环境变量同步
@@ -107,13 +118,16 @@ SchemaPulse/
 │           ├── email_service.py   # 邮件通知、防抖降噪与 HTML 告警模板
 │           ├── metric_service.py  # 历史时序监控指标聚合服务
 │           └── js_libs/           # 沙箱内置 JS 库 (crypto-js, jsrsasign)
-├── frontend/                      # 前端 SPA 页面与静态资源
-│   ├── run.py                     # 前端静态服务启动入口 (Port 3000)
-│   ├── index.html                 # Vue 3 + Element Plus + ECharts 仪表盘骨架
-│   ├── css/
-│   │   └── style.css              # 现代化深色运维仪表盘定制样式
-│   └── js/
-│       └── app.js                 # 前端核心业务控制器 (拓扑大盘/调试工作台/导入交互)
+├── frontend/                      # 前端 Vue 3 + Vite 工程
+│   ├── index.html                 # Vite 入口 HTML
+│   ├── vite.config.js             # Vite 配置 (3000 端口 + API 代理)
+│   ├── package.json               # 前端依赖与脚本 (dev/build/preview)
+│   ├── src/
+│   │   ├── main.js                # 应用入口 (挂载 Element Plus 与根组件)
+│   │   ├── App.vue                # 根组件模板 (九大工作台视图)
+│   │   ├── workbench.js           # 核心业务逻辑 (阶段二将拆分为 composables)
+│   │   └── style.css              # 深色运维仪表盘定制样式
+│   └── legacy/                    # 旧版 CDN 免构建版本 (保留可用，逐步废弃)
 ├── scripts/
 │   ├── start_all.py               # 跨平台一键前后端守护启动脚本
 │   └── standalone_probe.py        # 独立最小化探活脚本

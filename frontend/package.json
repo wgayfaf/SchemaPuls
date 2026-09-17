@@ -1,15 +1,28 @@
 {
   "name": "schemapulse-frontend",
   "version": "2.0.0",
-  "description": "SchemaPulse - 工业级服务健康与契约监控工作台独立前端工程",
-  "main": "index.html",
+  "description": "SchemaPulse - 工业级服务健康与契约监控工作台独立前端工程 (Vue 3 + Vite)",
+  "type": "module",
   "scripts": {
-    "serve": "python run.py",
-    "dev": "python run.py",
-    "start": "python run.py"
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "legacy": "python legacy/run.py"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "echarts": "^5.5.0",
+    "element-plus": "^2.6.3",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.0"
   },
   "keywords": [
     "vue3",
+    "vite",
     "element-plus",
     "echarts",
     "json-schema",
