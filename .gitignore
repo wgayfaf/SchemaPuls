@@ -28,7 +28,8 @@ ENV/
 env.bak/
 venv.bak/
 
-# SQLite temporary runtime files
+# SQLite runtime data files (数据库文件不进版本库)
+*.db
 *.db-wal
 *.db-shm
 *.db-journal
