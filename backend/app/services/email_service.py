@@ -4,14 +4,42 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any, Optional
+
+from sqlmodel import Session
 from datetime import datetime
 
-# 可从环境变量或配置文件读取 SMTP 设置
+from app.database import engine
+from app.models import SmtpConfig
+
+# 环境变量作为兜底默认值 (数据库未配置时生效)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.qq.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "")          # 发件人邮箱，如: your_name@qq.com
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")  # 邮箱授权码/密码
 SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "true").lower() == "true"
+
+
+def get_smtp_config() -> Dict[str, Any]:
+    """读取生效的 SMTP 配置: 数据库中前端保存的配置优先, 未配置时回退环境变量"""
+    with Session(engine) as session:
+        row = session.get(SmtpConfig, 1)
+        if row and row.smtp_user and row.smtp_password:
+            return {
+                "host": row.smtp_host,
+                "port": row.smtp_port,
+                "user": row.smtp_user,
+                "password": row.smtp_password,
+                "use_ssl": row.smtp_use_ssl,
+                "source": "database"
+            }
+    return {
+        "host": SMTP_HOST,
+        "port": SMTP_PORT,
+        "user": SMTP_USER,
+        "password": SMTP_PASSWORD,
+        "use_ssl": SMTP_USE_SSL,
+        "source": "environment"
+    }
 
 
 def generate_machine_offline_email_html(
@@ -109,25 +137,26 @@ def generate_machine_recovery_email_html(
 
 def _send_smtp_sync(receivers: List[str], subject: str, html_body: str):
     """底层同步 SMTP 发信逻辑"""
-    if not SMTP_USER or not SMTP_PASSWORD:
+    cfg = get_smtp_config()
+    if not cfg["user"] or not cfg["password"]:
         print(f"\n[邮件模拟输出] 未配置 SMTP 账号信息，已生成邮件 (发送给: {receivers}, 主题: {subject})")
         return
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = SMTP_USER
+    msg["From"] = cfg["user"]
     msg["To"] = ", ".join(receivers)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    if SMTP_USE_SSL:
-        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10)
+    if cfg["use_ssl"]:
+        server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10)
     else:
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+        server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10)
         server.starttls()
 
     try:
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(SMTP_USER, receivers, msg.as_string())
+        server.login(cfg["user"], cfg["password"])
+        server.sendmail(cfg["user"], receivers, msg.as_string())
         print(f"[邮件发送成功] 成功发送告警邮件至: {receivers}")
     finally:
         server.quit()

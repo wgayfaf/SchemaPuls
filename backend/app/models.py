@@ -185,3 +185,16 @@ class ProbeHistory(SQLModel, table=True):
     raw_response_snippet: Optional[str] = None
     is_healthy: bool = Field(index=True)
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class SmtpConfig(SQLModel, table=True):
+    """SMTP 邮件服务配置 (单行配置, id 恒为 1, 由前端设置页维护)"""
+    __tablename__ = "smtp_config"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    smtp_host: str = Field(default="smtp.qq.com")
+    smtp_port: int = Field(default=465)
+    smtp_user: str = Field(default="")
+    smtp_password: str = Field(default="")
+    smtp_use_ssl: bool = Field(default=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

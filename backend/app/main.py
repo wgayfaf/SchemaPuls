@@ -20,7 +20,7 @@ from app.database import init_db
 from app.services.scheduler import init_scheduler, scheduler
 from app.routers import (
     topology, environments, groups, machines,
-    apis, tools, targets, postman,
+    apis, tools, targets, postman, settings,
 )
 
 
@@ -58,6 +58,7 @@ app.include_router(apis.router)
 app.include_router(tools.router)
 app.include_router(targets.router)
 app.include_router(postman.router)
+app.include_router(settings.router)
 
 
 @app.get("/")

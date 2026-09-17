@@ -33,7 +33,7 @@ def init_db():
     from app.models import (
         Environment, ServiceGroup, MachineNode, ApiProbe,
         MachineProbeHistory, ApiProbeHistory,
-        MonitorTarget, ProbeHistory
+        MonitorTarget, ProbeHistory, SmtpConfig
     )
     # 创建所有四层模型新表以及兼容表
     SQLModel.metadata.create_all(engine)
