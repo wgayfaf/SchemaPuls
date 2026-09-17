@@ -213,6 +213,60 @@
                         </el-table>
                     </div>
                 </div>
+
+<!-- ================= 领域弹窗/抽屉 ================= -->
+<el-dialog v-model="machineDialogVisible" :title="editingMachineId ? '编辑机器节点' : '新建机器节点'" width="560px"
+    destroy-on-close>
+    <el-form :model="machineForm" label-width="110px">
+        <el-form-item label="所属环境" required>
+            <el-select v-model="machineForm.environment_id" placeholder="选择所属环境" style="width: 100%;">
+                <el-option v-for="env in environmentList" :key="env.id"
+                    :label="env.name + (env.description ? ' (' + env.description + ')' : '')"
+                    :value="env.id"></el-option>
+            </el-select>
+        </el-form-item>
+        <el-form-item label="机器名称" required>
+            <el-input v-model="machineForm.name" placeholder="例如: 生产网关节点-01"></el-input>
+        </el-form-item>
+        <el-row :gutter="12">
+            <el-col :span="15">
+                <el-form-item label="IP / 域名" required>
+                    <el-input v-model="machineForm.host"
+                        placeholder="例如: 192.168.1.10 或 httpbin.org"></el-input>
+                </el-form-item>
+            </el-col>
+            <el-col :span="9">
+                <el-form-item label="TCP 端口" required label-width="80px">
+                    <el-input-number v-model="machineForm.port" :min="1" :max="65535"
+                        style="width: 100%;"></el-input-number>
+                </el-form-item>
+            </el-col>
+        </el-row>
+        <el-form-item label="服务基准地址">
+            <el-input v-model="machineForm.base_url"
+                placeholder="例如: https://api.prod.com 或 http://192.168.1.10:8080 (选填)">
+                <template #prefix><i class="fa-solid fa-globe" style="color: #64748b;"></i></template>
+            </el-input>
+            <div style="font-size: 11.5px; color: #64748b; line-height: 1.4; margin-top: 4px;">
+                选填。该机器节点对外暴露的前置服务基准 URL（支持 http/https、域名或 IP 端口）。名下接口将默认继承此基准地址。
+            </div>
+        </el-form-item>
+        <el-form-item label="探活周期(分)">
+            <el-input-number v-model="machineForm.cron_interval_minutes" :min="1" :max="60"
+                style="width: 140px;"></el-input-number>
+            <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">后台定时探测 TCP 端口开放情况</span>
+        </el-form-item>
+        <el-form-item label="告警通知邮箱">
+            <el-input v-model="machineForm.email_input" placeholder="多个邮箱用逗号隔开，如: ops@company.com"></el-input>
+        </el-form-item>
+    </el-form>
+    <template #footer>
+        <el-button @click="machineDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitMachineForm" :loading="machineSubmitting">
+            {{ editingMachineId ? '保存修改' : '确认接入' }}
+        </el-button>
+    </template>
+</el-dialog>
 </template>
 
 <script>

@@ -124,8 +124,10 @@ SchemaPulse/
 │   ├── package.json               # 前端依赖与脚本 (dev/build/preview)
 │   ├── src/
 │   │   ├── main.js                # 应用入口 (挂载 Element Plus 与根组件)
-│   │   ├── App.vue                # 根组件模板 (九大工作台视图)
-│   │   ├── workbench.js           # 核心业务逻辑 (阶段二将拆分为 composables)
+│   │   ├── App.vue                # 布局骨架 (侧边栏/顶栏/视图挂载)
+│   │   ├── views/                 # 八大工作台视图组件 + 领域弹窗
+│   │   ├── composables/           # 领域状态与逻辑 (core/targets/env/machines/apis/postman/lab)
+│   │   ├── workbench.js           # 编排层 (状态装配与生命周期)
 │   │   └── style.css              # 深色运维仪表盘定制样式
 │   └── legacy/                    # 旧版 CDN 免构建版本 (保留可用，逐步废弃)
 ├── scripts/
