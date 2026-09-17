@@ -114,9 +114,44 @@ const app = createApp({
             http_path: "",
             http_method: "GET",
             cron_interval_minutes: 5,
+            is_active: true,
             email_input: "admin@company.com",
             schema_text: ""
         });
+        const apiIntervalValue = ref(5);
+        const apiIntervalUnit = ref("minutes"); // 'minutes' | 'hours' | 'days'
+
+        const setQuickInterval = (val, unit) => {
+            apiIntervalValue.value = val;
+            apiIntervalUnit.value = unit;
+        };
+
+        const formatIntervalDisplay = (minutes, isActive) => {
+            if (isActive === false) return "已关闭";
+            const m = parseInt(minutes, 10) || 5;
+            if (m >= 1440 && m % 1440 === 0) {
+                return `${m / 1440}天`;
+            }
+            if (m >= 60 && m % 60 === 0) {
+                return `${m / 60}小时`;
+            }
+            return `${m}m`;
+        };
+
+        const getIntervalTooltip = (minutes, isActive) => {
+            if (isActive === false) return "该接口已关闭自动探测（仅支持手动拨测或链式调用触发），点击可快速启用";
+            const m = parseInt(minutes, 10) || 5;
+            let human = `${m} 分钟`;
+            if (m >= 1440) {
+                const days = (m / 1440).toFixed(1).replace(/\.0$/, "");
+                human = `${days} 天 (${m} 分钟)`;
+            } else if (m >= 60) {
+                const hrs = (m / 60).toFixed(1).replace(/\.0$/, "");
+                human = `${hrs} 小时 (${m} 分钟)`;
+            }
+            return `每 ${human} 自动探活一次，点击可快捷关闭`;
+        };
+
 
         // Postman 风格工作台专属响应式状态
         const apiActiveTab = ref("params"); // 'params' | 'headers' | 'body' | 'auth' | 'schema'
@@ -1540,9 +1575,12 @@ const app = createApp({
                 http_path: "",
                 http_method: "GET",
                 cron_interval_minutes: 5,
+                is_active: true,
                 email_input: "admin@company.com",
                 schema_text: ""
             };
+            apiIntervalValue.value = 5;
+            apiIntervalUnit.value = "minutes";
             apiSampleJson.value = "";
             apiActiveTab.value = "params";
             apiResponseTab.value = "body";
@@ -1753,6 +1791,18 @@ const app = createApp({
                 fetchMachineEnvironment(row.machine_id);
             }
 
+            let initMins = parseInt(row.cron_interval_minutes, 10) || 5;
+            if (initMins >= 1440 && initMins % 1440 === 0) {
+                apiIntervalValue.value = initMins / 1440;
+                apiIntervalUnit.value = "days";
+            } else if (initMins >= 60 && initMins % 60 === 0) {
+                apiIntervalValue.value = initMins / 60;
+                apiIntervalUnit.value = "hours";
+            } else {
+                apiIntervalValue.value = initMins;
+                apiIntervalUnit.value = "minutes";
+            }
+
             isSyncingUrlParams = true;
             apiForm.value = {
                 machine_id: row.machine_id,
@@ -1760,7 +1810,8 @@ const app = createApp({
                 base_url: initialBaseUrl,
                 http_path: row.http_path || "",
                 http_method: row.http_method || "GET",
-                cron_interval_minutes: row.cron_interval_minutes || 5,
+                cron_interval_minutes: initMins,
+                is_active: row.is_active !== false,
                 email_input: (row.email_receivers && Array.isArray(row.email_receivers))
                     ? row.email_receivers.join(", ")
                     : (row.email_receivers || ""),
@@ -2180,6 +2231,16 @@ const app = createApp({
                 ? apiForm.value.email_input.split(/[,;，；\s]+/).filter(Boolean)
                 : [];
 
+            // 智能根据所选单位计算最终存入后端的分钟数
+            let finalIntervalMinutes = 5;
+            if (apiIntervalUnit.value === "days") {
+                finalIntervalMinutes = Math.max(1, Math.round(apiIntervalValue.value * 1440));
+            } else if (apiIntervalUnit.value === "hours") {
+                finalIntervalMinutes = Math.max(1, Math.round(apiIntervalValue.value * 60));
+            } else {
+                finalIntervalMinutes = Math.max(1, Math.round(apiIntervalValue.value || 5));
+            }
+
             const payload = {
                 machine_id: apiForm.value.machine_id,
                 name: apiForm.value.name.trim(),
@@ -2187,8 +2248,8 @@ const app = createApp({
                 http_path: apiForm.value.http_path.trim(),
                 http_method: apiForm.value.http_method,
                 expected_schema: parsedSchema,
-                cron_interval_minutes: apiForm.value.cron_interval_minutes || 5,
-                is_active: true,
+                cron_interval_minutes: finalIntervalMinutes,
+                is_active: apiForm.value.is_active !== false,
                 email_receivers: receivers,
                 http_params: apiParamsList.value.filter(p => p.key && p.key.trim() !== ""),
                 http_headers: getEffectiveHeaders(),
@@ -2207,7 +2268,7 @@ const app = createApp({
                     ElementPlus.ElMessage.success(`接口 [${payload.name}] 配置已更新！`);
                 } else {
                     await axios.post("/api/apis", payload);
-                    ElementPlus.ElMessage.success(`接口 [${payload.name}] 已添加并接入定时调度！`);
+                    ElementPlus.ElMessage.success(`接口 [${payload.name}] 已添加并接入调度！`);
                 }
                 apiDialogVisible.value = false;
                 await fetchData();
@@ -2215,6 +2276,20 @@ const app = createApp({
                 ElementPlus.ElMessage.error((editingApiId.value ? "更新失败: " : "创建失败: ") + (err.response?.data?.detail || err.message));
             } finally {
                 apiSubmitting.value = false;
+            }
+        };
+
+        const toggleApiActive = async (row) => {
+            try {
+                const res = await axios.post(`/api/apis/${row.id}/toggle-active`);
+                row.is_active = res.data.is_active;
+                if (row.is_active) {
+                    ElementPlus.ElMessage.success(`接口 [${row.name}] 已启用定时自动探测 (${formatIntervalDisplay(row.cron_interval_minutes, true)})！`);
+                } else {
+                    ElementPlus.ElMessage.info(`接口 [${row.name}] 已关闭自动探测 (仅支持手动拨测/链式调用)！`);
+                }
+            } catch (err) {
+                ElementPlus.ElMessage.error("切换状态失败: " + (err.response?.data?.detail || err.message));
             }
         };
 
@@ -2291,6 +2366,7 @@ const app = createApp({
                 full_url: fullUrl,
                 current_status: row.current_status,
                 cron_interval_minutes: row.cron_interval_minutes || 5,
+                is_active: row.is_active !== false,
                 last_http_latency_ms: row.last_http_latency_ms
             };
             drawerVisible.value = true;
@@ -2934,7 +3010,14 @@ const app = createApp({
             togglePostmanApiSelection,
             executeConfirmPostmanImport,
             resetPostmanImport,
-            goToImportedApisView
+            goToImportedApisView,
+            // 接口探针周期自定义与启停导出
+            apiIntervalValue,
+            apiIntervalUnit,
+            setQuickInterval,
+            formatIntervalDisplay,
+            getIntervalTooltip,
+            toggleApiActive
         };
 
         // 调试与自动化测试全局挂载

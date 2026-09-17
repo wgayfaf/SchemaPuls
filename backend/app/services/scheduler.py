@@ -85,7 +85,7 @@ def add_api_job(api: ApiProbe):
     if scheduler.get_job(job_id):
         scheduler.remove_job(job_id)
         
-    if api.is_active:
+    if api.is_active and (api.cron_interval_minutes or 0) > 0:
         interval = max(1, api.cron_interval_minutes or 1)
         scheduler.add_job(
             scheduled_api_job,
@@ -97,6 +97,9 @@ def add_api_job(api: ApiProbe):
             replace_existing=True
         )
         print(f"[Scheduler] Registered api probe [{api.name}] every {interval}m (Initial probe queued immediately)")
+    else:
+        print(f"[Scheduler] Api probe [{api.name}] id={api.id} is inactive or disabled (not scheduled in cron)")
+
 
 
 def remove_api_job(api_id: int):

@@ -756,8 +756,8 @@
                         </div>
 
                         <el-table :data="filteredApis" v-loading="loading" style="width: 100%">
-                            <el-table-column prop="id" label="ID" width="60" align="center"></el-table-column>
-                            <el-table-column label="接口名称" min-width="170">
+                            <el-table-column prop="id" label="ID" width="50" align="center"></el-table-column>
+                            <el-table-column label="接口名称" min-width="150">
                                 <template #default="{ row }">
                                     <div style="display: flex; flex-direction: column;">
                                         <div style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}
@@ -771,7 +771,7 @@
                                     </div>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="所属环境" width="120">
+                            <el-table-column label="所属环境" width="100" align="center">
                                 <template #default="{ row }">
                                     <el-tag size="small" :type="getGroupTagType(row.environment_name)" effect="light"
                                         style="font-weight: 600;">
@@ -779,7 +779,7 @@
                                     </el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="请求方法与完整地址" min-width="260">
+                            <el-table-column label="请求方法与完整地址" min-width="190">
                                 <template #default="{ row }">
                                     <div style="display: flex; align-items: center; gap: 6px;">
                                         <el-tag size="small"
@@ -788,15 +788,15 @@
                                             {{ row.http_method }}
                                         </el-tag>
                                         <span class="code-pill"
-                                            style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                            style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                                             :title="row.full_url || (row.machine_host + ':' + row.machine_port + row.http_path)">
                                             {{ row.full_url || (row.machine_host + ':' + row.machine_port +
-                                            row.http_path) }}
+                                             row.http_path) }}
                                         </span>
                                     </div>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="运行状态" width="135" align="center">
+                            <el-table-column label="运行状态" width="115" align="center">
                                 <template #default="{ row }">
                                     <span v-if="row.current_status === 'CIRCUIT_BROKEN'"
                                         class="status-badge circuit-broken">
@@ -808,7 +808,7 @@
                                     </span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="HTTP/延迟" width="125" align="center">
+                            <el-table-column label="HTTP/延迟" width="110" align="center">
                                 <template #default="{ row }">
                                     <div
                                         v-if="row.last_http_latency_ms !== null && row.last_http_latency_ms !== undefined">
@@ -819,19 +819,29 @@
                                     <span v-else style="color: var(--text-muted); font-size: 12px;">待探测</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="契约校验" width="115" align="center">
+                            <el-table-column label="契约校验" width="90" align="center">
                                 <template #default="{ row }">
                                     <el-tag v-if="row.last_schema_matched === true" type="success"
                                         size="small">一致</el-tag>
                                     <el-tag v-else-if="row.last_schema_matched === false" type="danger"
-                                        size="small">破坏性突变</el-tag>
+                                        size="small">突变</el-tag>
                                     <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="cron_interval_minutes" label="周期" width="75" align="center">
+                            <el-table-column prop="cron_interval_minutes" label="探测周期" width="95" align="center">
                                 <template #default="{ row }">
-                                    <span style="font-size: 12px; color: var(--text-muted);">{{
-                                        row.cron_interval_minutes }}m</span>
+                                    <el-tooltip :content="getIntervalTooltip(row.cron_interval_minutes, row.is_active)" placement="top">
+                                        <el-tag v-if="row.is_active === false" size="small" type="info" effect="plain"
+                                            class="probe-interval-tag"
+                                            style="cursor: pointer; font-size: 11px;" @click="toggleApiActive(row)">
+                                            <i class="fa-solid fa-pause" style="margin-right: 3px;"></i>已关闭
+                                        </el-tag>
+                                        <el-tag v-else size="small" type="primary" effect="plain"
+                                            class="probe-interval-tag"
+                                            style="cursor: pointer; font-weight: 600; font-size: 11px;" @click="toggleApiActive(row)">
+                                            <i class="fa-solid fa-clock" style="margin-right: 3px; font-size: 10px;"></i>{{ formatIntervalDisplay(row.cron_interval_minutes, row.is_active) }}
+                                        </el-tag>
+                                    </el-tooltip>
                                 </template>
                             </el-table-column>
                             <el-table-column label="操作" width="200" align="center" fixed="right">
@@ -1479,16 +1489,61 @@ export SMTP_USE_SSL="true"
                     </el-col>
                 </el-row>
                 <el-row :gutter="16" style="margin-top: 10px;">
-                    <el-col :span="10">
-                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
-                            探测周期(分钟)
-                            <span
-                                style="font-size: 11px; font-weight: normal; color: #94a3b8; margin-left: 4px;">宿主离线自动熔断抑制</span>
+                    <el-col :span="13">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-clock-rotate-left" style="color: #2563eb;"></i>
+                                <span>定时自动探测调度</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 11.5px; color: #64748b;">{{ apiForm.is_active ? '已启用自动探测' : '已关闭自动探测' }}</span>
+                                <el-switch v-model="apiForm.is_active" inline-prompt active-text="开" inactive-text="关"
+                                    style="--el-switch-on-color: #10b981;"></el-switch>
+                            </div>
                         </div>
-                        <el-input-number v-model="apiForm.cron_interval_minutes" :min="1" :max="60"
-                            style="width: 100%;"></el-input-number>
+
+                        <!-- 启用状态下：数值 + 单位下拉 + 快捷胶囊 -->
+                        <div v-if="apiForm.is_active">
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <el-input-number v-model="apiIntervalValue" :min="1" :max="999999" controls-position="right"
+                                    style="width: 140px;" placeholder="周期数值"></el-input-number>
+                                <el-select v-model="apiIntervalUnit" style="width: 115px;">
+                                    <el-option label="分钟 (m)" value="minutes"></el-option>
+                                    <el-option label="小时 (h)" value="hours"></el-option>
+                                    <el-option label="天 (d)" value="days"></el-option>
+                                </el-select>
+                                <span style="font-size: 11.5px; color: #64748b; margin-left: 2px;">
+                                    <span v-if="apiIntervalUnit === 'days'">折合 {{ apiIntervalValue * 1440 }} 分钟</span>
+                                    <span v-else-if="apiIntervalUnit === 'hours'">折合 {{ apiIntervalValue * 60 }} 分钟</span>
+                                    <span v-else>{{ apiIntervalValue }} 分钟</span>
+                                </span>
+                            </div>
+                            <!-- 常用快捷周期预设 -->
+                            <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap;">
+                                <span style="font-size: 11px; color: #94a3b8;">快捷预设:</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(5, 'minutes')" style="font-size: 11px; padding: 0;">5m</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(15, 'minutes')" style="font-size: 11px; padding: 0;">15m</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(1, 'hours')" style="font-size: 11px; padding: 0;">1h</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(12, 'hours')" style="font-size: 11px; padding: 0;">12h</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(1, 'days')" style="font-size: 11px; padding: 0;">1天</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(7, 'days')" style="font-size: 11px; padding: 0;">7天</el-button>
+                                <span style="color: #cbd5e1; font-size: 10px;">|</span>
+                                <el-button size="small" link type="primary" @click="setQuickInterval(30, 'days')" style="font-size: 11px; padding: 0; font-weight: 700; color: #7c3aed;">30天 (长效)</el-button>
+                            </div>
+                        </div>
+
+                        <!-- 停用状态下：提示文本 -->
+                        <div v-else style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; padding: 8px 10px; font-size: 11.5px; color: #64748b; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-circle-pause" style="color: #94a3b8; font-size: 13px;"></i>
+                            <span>已关闭后台定时自动探测。该接口仅支持在控制台手动点击【拨测】或作为前置调用时触发。</span>
+                        </div>
                     </el-col>
-                    <el-col :span="14">
+                    <el-col :span="11">
                         <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
                             异常告警通知邮箱
                             <span
@@ -1496,6 +1551,9 @@ export SMTP_USE_SSL="true"
                         </div>
                         <el-input v-model="apiForm.email_input"
                             placeholder="例如: api-ops@company.com, monitor@company.com"></el-input>
+                        <div style="font-size: 11px; color: #94a3b8; margin-top: 8px;">
+                            <i class="fa-solid fa-shield-halved" style="margin-right: 4px; color: #10b981;"></i>宿主机器离线将自动熔断探针抑制误报
+                        </div>
                     </el-col>
                 </el-row>
             </div>
@@ -2637,8 +2695,9 @@ export SMTP_USE_SSL="true"
                             </span>
                         </div>
                         <div style="font-size: 12px; color: #64748b;">
-                            <i class="fa-solid fa-clock" style="margin-right: 4px; color: #8b5cf6;"></i>巡检周期: 每 {{
-                            activeTarget.cron_interval_minutes || 5 }} 分钟
+                            <i class="fa-solid fa-clock" style="margin-right: 4px; color: #8b5cf6;"></i>巡检周期: 
+                            <span v-if="activeTarget.is_active === false" style="color: #ef4444; font-weight: 600;">已关闭自动探测 (手动/前置触发)</span>
+                            <span v-else>每 {{ formatIntervalDisplay(activeTarget.cron_interval_minutes, true) }} 自动巡检</span>
                         </div>
                     </div>
                     <div

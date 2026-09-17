@@ -989,7 +989,37 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     }
 
 
+@app.post("/api/apis/{id}/toggle-active")
+def toggle_api_active(id: int, session: Session = Depends(get_session)):
+    """快捷切换接口探针的自动定时探测开关"""
+    api = session.get(ApiProbe, id)
+    if not api:
+        raise HTTPException(status_code=404, detail="接口探针不存在")
+    api.is_active = not api.is_active
+    session.add(api)
+    session.commit()
+    session.refresh(api)
+    add_api_job(api)
+    
+    # 同步对应的兼容 MonitorTarget
+    targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == api.name)).all()
+    for t in targets:
+        t.is_active = api.is_active
+        session.add(t)
+        add_target_job(t)
+    session.commit()
+    
+    return {
+        "status": "ok",
+        "id": api.id,
+        "name": api.name,
+        "is_active": api.is_active,
+        "cron_interval_minutes": api.cron_interval_minutes
+    }
+
+
 @app.delete("/api/apis/{id}")
+
 def delete_api(id: int, session: Session = Depends(get_session)):
     api = session.get(ApiProbe, id)
     if not api:
