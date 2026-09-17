@@ -42,9 +42,9 @@
 ### 1. 环境准备
 * Python 3.11+ 或 3.12
 * Node.js 18+ (前端 Vite 工程构建与开发)
-* 后端依赖库安装：
+* 后端依赖安装：
   ```bash
-  pip install fastapi uvicorn httpx sqlmodel jsonschema genson apscheduler quickjs
+  pip install -r backend/requirements.txt
   ```
 * 前端依赖安装（首次）：
   ```bash
