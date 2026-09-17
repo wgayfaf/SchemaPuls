@@ -17,7 +17,8 @@ from app.database import engine
 from app.services.email_service import (
     send_email_notification,
     generate_machine_offline_email_html,
-    generate_machine_recovery_email_html
+    generate_machine_recovery_email_html,
+    get_smtp_config
 )
 from app.services.template_engine import (
     render_macro_string,
@@ -260,6 +261,9 @@ async def execute_machine_probe(machine_id: int) -> MachineProbeHistory:
         retry_threshold = machine.retry_threshold or 3
         silence_minutes = machine.silence_minutes or 30
         email_receivers = list(machine.email_receivers or [])
+        if not email_receivers:
+            # 机器未单独配置时, 回退到 SMTP 设置页的全局告警收件人
+            email_receivers = list(get_smtp_config().get("receivers") or [])
         prev_status = machine.current_status
         prev_failures = machine.consecutive_failures or 0
         last_alert_at = machine.last_alert_at

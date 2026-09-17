@@ -1,5 +1,5 @@
 """系统设置: SMTP 邮件服务配置 (前端设置页维护, 存储于数据库)"""
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -18,10 +18,11 @@ class SmtpConfigPayload(BaseModel):
     smtp_user: str = ""
     smtp_password: Optional[str] = ""   # 为空表示保留已保存的密码
     smtp_use_ssl: bool = True
+    alert_receivers: List[str] = []     # 全局告警收件人 (机器未单独填写时使用)
 
 
 class SmtpTestPayload(BaseModel):
-    receiver: str
+    receiver: str = ""
 
 
 @router.get("/smtp")
@@ -34,6 +35,7 @@ def get_smtp_settings(session: Session = Depends(get_session)):
             "smtp_port": row.smtp_port,
             "smtp_user": row.smtp_user,
             "smtp_use_ssl": row.smtp_use_ssl,
+            "alert_receivers": list(row.alert_receivers or []),
             "password_set": bool(row.smtp_password),
             "source": "database"
         }
@@ -44,6 +46,7 @@ def get_smtp_settings(session: Session = Depends(get_session)):
         "smtp_port": env_cfg["port"],
         "smtp_user": env_cfg["user"],
         "smtp_use_ssl": env_cfg["use_ssl"],
+        "alert_receivers": env_cfg["receivers"],
         "password_set": bool(env_cfg["password"]),
         "source": env_cfg["source"]
     }
@@ -61,6 +64,7 @@ def update_smtp_settings(payload: SmtpConfigPayload, session: Session = Depends(
     if payload.smtp_password:  # 仅在填写了新密码时覆盖
         row.smtp_password = payload.smtp_password
     row.smtp_use_ssl = payload.smtp_use_ssl
+    row.alert_receivers = [r.strip() for r in payload.alert_receivers if r.strip()]
     from datetime import datetime
     row.updated_at = datetime.utcnow()
     session.add(row)
@@ -69,13 +73,18 @@ def update_smtp_settings(payload: SmtpConfigPayload, session: Session = Depends(
 
 
 @router.post("/smtp/test")
-async def test_smtp_settings(payload: SmtpTestPayload):
-    """向指定邮箱发送一封测试邮件 (使用当前生效配置)"""
+async def test_smtp_settings(payload: SmtpTestPayload, session: Session = Depends(get_session)):
+    """发送测试邮件 (未指定收件人时发送到全局告警收件人)"""
     cfg = get_smtp_config()
     if not cfg["user"] or not cfg["password"]:
         raise HTTPException(status_code=400, detail="请先完整填写并保存 SMTP 账号与授权码")
-    if not payload.receiver or "@" not in payload.receiver:
-        raise HTTPException(status_code=400, detail="请填写有效的测试收件邮箱")
+    receiver = payload.receiver.strip()
+    if not receiver:
+        row = session.get(SmtpConfig, 1)
+        fallback = list(row.alert_receivers or []) if row else []
+        if not fallback:
+            raise HTTPException(status_code=400, detail="请填写测试收件邮箱, 或先在上方保存全局告警收件人")
+        receiver = fallback[0]
     subject = "🧪【SchemaPulse】SMTP 配置测试邮件"
     html = f"""
     <div style="font-family: sans-serif; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
@@ -84,5 +93,5 @@ async def test_smtp_settings(payload: SmtpTestPayload):
       <p style="color: #64748b;">收到此邮件说明 SchemaPulse 的机器告警邮件通道已就绪。</p>
     </div>
     """
-    await send_email_notification([payload.receiver.strip()], subject, html)
-    return {"status": "ok", "message": f"测试邮件已发送至 {payload.receiver}"}
+    await send_email_notification([receiver], subject, html)
+    return {"status": "ok", "message": f"测试邮件已发送至 {receiver}"}

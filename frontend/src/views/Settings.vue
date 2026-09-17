@@ -26,6 +26,13 @@
                                 <el-input v-model="smtpForm.password" type="password" show-password
                                     :placeholder="passwordSet ? '已保存 (留空则不修改)' : '邮箱 SMTP 授权码 (非登录密码)'" />
                             </el-form-item>
+                            <el-form-item label="全局收件人">
+                                <el-input v-model="receiversInput"
+                                    placeholder="多个邮箱用逗号隔开，如: ops@company.com, boss@company.com" />
+                                <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
+                                    机器离线/恢复时发给这些邮箱；机器若单独填写了告警邮箱，则优先使用机器的
+                                </div>
+                            </el-form-item>
                             <el-form-item label="SSL 加密">
                                 <el-switch v-model="smtpForm.useSsl" />
                             </el-form-item>
@@ -83,6 +90,7 @@ const passwordSet = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const testReceiver = ref('')
+const receiversInput = ref('')   // 全局告警收件人 (逗号分隔文本)
 
 const loadConfig = async () => {
     try {
@@ -92,6 +100,7 @@ const loadConfig = async () => {
         smtpForm.value.user = res.data.smtp_user
         smtpForm.value.useSsl = res.data.smtp_use_ssl
         passwordSet.value = res.data.password_set
+        receiversInput.value = (res.data.alert_receivers || []).join(', ')
     } catch (err) {
         ElMessage.error('读取 SMTP 配置失败: ' + (err.response?.data?.detail || err.message))
     }
@@ -109,7 +118,8 @@ const saveSmtp = async () => {
             smtp_port: smtpForm.value.port,
             smtp_user: smtpForm.value.user,
             smtp_password: smtpForm.value.password,   // 留空表示保留原密码
-            smtp_use_ssl: smtpForm.value.useSsl
+            smtp_use_ssl: smtpForm.value.useSsl,
+            alert_receivers: receiversInput.value.split(/[,;，；\s]+/).filter(Boolean)
         })
         ElMessage.success('SMTP 配置已保存')
         smtpForm.value.password = ''                  // 清空明文, 避免回显
@@ -124,7 +134,7 @@ const saveSmtp = async () => {
 const sendTest = async () => {
     testing.value = true
     try {
-        await axios.post('/api/settings/smtp/test', { receiver: testReceiver.value })
+        await axios.post('/api/settings/smtp/test', { receiver: testReceiver.value })   // 留空时后端自动发给全局收件人
         ElMessage.success('测试邮件已发送，请查收')
     } catch (err) {
         ElMessage.error('发送失败: ' + (err.response?.data?.detail || err.message))

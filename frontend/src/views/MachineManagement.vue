@@ -257,7 +257,8 @@
             <span style="margin-left: 10px; color: var(--text-muted); font-size: 12px;">后台定时探测 TCP 端口开放情况</span>
         </el-form-item>
         <el-form-item label="告警通知邮箱">
-            <el-input v-model="machineForm.email_input" placeholder="多个邮箱用逗号隔开，如: ops@company.com"></el-input>
+            <el-input v-model="machineForm.email_input"
+                placeholder="留空则使用 SMTP 设置页的全局收件人；也可单独指定，多个邮箱用逗号隔开"></el-input>
         </el-form-item>
     </el-form>
     <template #footer>

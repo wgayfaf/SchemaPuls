@@ -69,7 +69,14 @@ def init_db():
                 conn.execute(text(f"ALTER TABLE api_probes ADD COLUMN {col_name} {col_def}"))
                 conn.commit()
             except Exception:
-                pass
+                pass  # 若字段已存在则忽略异常
+
+        # smtp_config 表新增全局告警收件人列 (兼容已建表的老库)
+        try:
+            conn.execute(text("ALTER TABLE smtp_config ADD COLUMN alert_receivers TEXT DEFAULT '[]'"))
+            conn.commit()
+        except Exception:
+            pass
 
         env_columns_to_add = [
             ("base_url", "VARCHAR(255)"),

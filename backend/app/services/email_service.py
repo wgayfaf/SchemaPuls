@@ -30,6 +30,7 @@ def get_smtp_config() -> Dict[str, Any]:
                 "user": row.smtp_user,
                 "password": row.smtp_password,
                 "use_ssl": row.smtp_use_ssl,
+                "receivers": list(row.alert_receivers or []),
                 "source": "database"
             }
     return {
@@ -38,6 +39,7 @@ def get_smtp_config() -> Dict[str, Any]:
         "user": SMTP_USER,
         "password": SMTP_PASSWORD,
         "use_ssl": SMTP_USE_SSL,
+        "receivers": [],
         "source": "environment"
     }
 

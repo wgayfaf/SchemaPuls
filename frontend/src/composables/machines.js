@@ -24,7 +24,7 @@ const machineForm = ref({
     port: 80,
     base_url: "",
     cron_interval_minutes: 5,
-    email_input: "admin@company.com"
+    email_input: ""
 });
 
 // 环境级变量联动响应式状态
@@ -116,7 +116,7 @@ const openCreateMachineDialog = (defaultEnvId = null) => {
         port: 80,
         base_url: "",
         cron_interval_minutes: 5,
-        email_input: "admin@company.com"
+        email_input: ""
     };
     machineDialogVisible.value = true;
 };
