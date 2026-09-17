@@ -1048,4 +1048,41 @@
             gap: 6px;
         }
 
+        /* 机器与接口列表操作列 2x2 对齐布局 */
+        .machine-action-grid,
+        .api-action-grid,
+        .table-action-grid-2x2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            width: 176px;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+
+        .machine-action-grid > *,
+        .api-action-grid > *,
+        .table-action-grid-2x2 > * {
+            width: 100% !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+        }
+
+        .machine-action-grid .el-button,
+        .api-action-grid .el-button,
+        .table-action-grid-2x2 .el-button {
+            margin: 0 !important;
+            width: 100% !important;
+            padding: 5px 6px !important;
+            height: 28px !important;
+            font-size: 12px !important;
+            display: inline-flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            box-sizing: border-box !important;
+            border-radius: 4px !important;
+        }
+
+
+
 
