@@ -241,7 +241,7 @@
             </el-col>
         </el-row>
         <el-row :gutter="16" style="margin-top: 10px;">
-            <el-col :span="13">
+            <el-col :span="24">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                     <div style="font-size: 12px; font-weight: 600; color: #475569; display: flex; align-items: center; gap: 6px;">
                         <i class="fa-solid fa-clock-rotate-left" style="color: #2563eb;"></i>
@@ -293,18 +293,6 @@
                 <div v-else style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; padding: 8px 10px; font-size: 11.5px; color: #64748b; display: flex; align-items: center; gap: 6px;">
                     <i class="fa-solid fa-circle-pause" style="color: #94a3b8; font-size: 13px;"></i>
                     <span>已关闭后台定时自动探测。该接口仅支持在控制台手动点击【拨测】或作为前置调用时触发。</span>
-                </div>
-            </el-col>
-            <el-col :span="11">
-                <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">
-                    异常告警通知邮箱
-                    <span
-                        style="font-size: 11px; font-weight: normal; color: #94a3b8; margin-left: 4px;">多个邮箱用逗号隔开</span>
-                </div>
-                <el-input v-model="apiForm.email_input"
-                    placeholder="例如: api-ops@company.com, monitor@company.com"></el-input>
-                <div style="font-size: 11px; color: #94a3b8; margin-top: 8px;">
-                    <i class="fa-solid fa-shield-halved" style="margin-right: 4px; color: #10b981;"></i>宿主机器离线将自动熔断探针抑制误报
                 </div>
             </el-col>
         </el-row>

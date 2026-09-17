@@ -16,8 +16,6 @@ from app.models import (
 from app.database import engine
 from app.services.email_service import (
     send_email_notification,
-    generate_alert_email_html,
-    generate_recovery_email_html,
     generate_machine_offline_email_html,
     generate_machine_recovery_email_html
 )
@@ -434,7 +432,6 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         api_post_actions = list(api.post_actions or [])
         api_retry_threshold = api.retry_threshold or 3
         api_silence_minutes = api.silence_minutes or 30
-        api_email_receivers = list(api.email_receivers or [])
         prev_status = api.current_status
         prev_failures = api.consecutive_failures or 0
         last_alert_at = api.last_alert_at
@@ -594,12 +591,6 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             raise ValueError(f"ApiProbe {api_id} not found")
 
         if is_healthy:
-            if prev_status in ["DOWN", "DEGRADED"]:
-                if api_email_receivers:
-                    subject = f"🟢【SchemaPulse 已恢复】接口 {api_name} 契约与断言校验恢复正常"
-                    html = generate_recovery_email_html(api_name, f"{machine_host}:{machine_port}{api_http_path}")
-                    asyncio.create_task(send_email_notification(api_email_receivers, subject, html))
-
             api.current_status = "HEALTHY"
             api.consecutive_failures = 0
         else:
@@ -621,19 +612,6 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
                         failed_asserts = [a.get("name", "断言失败") for a in assertions_result if not a.get("passed", False)]
                         reasons.append(f"后置断言未通过({', '.join(failed_asserts[:2])})")
 
-                    if api_email_receivers:
-                        subject = f"🚨【SchemaPulse 告警】接口 {api_name} 探测未通过"
-                        html = generate_alert_email_html(
-                            target_name=api_name,
-                            target_addr=f"{machine_host}:{machine_port}{api_http_path}",
-                            failure_reasons=reasons,
-                            consecutive_failures=api.consecutive_failures,
-                            tcp_info=(True, machine_last_tcp_ms),
-                            http_info=(http_code, http_ms),
-                            schema_errors=schema_errors,
-                            raw_snippet=raw_snippet or ""
-                        )
-                        asyncio.create_task(send_email_notification(api_email_receivers, subject, html))
                     api.last_alert_at = now
                 api.current_status = "DOWN"
             else:
