@@ -169,6 +169,8 @@
                                         size="small">一致</el-tag>
                                     <el-tag v-else-if="row.last_schema_matched === false" type="danger"
                                         size="small">突变</el-tag>
+                                    <el-tag v-else-if="!row.schema_configured" type="info" effect="plain"
+                                        size="small">未配置</el-tag>
                                     <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
                                 </template>
                             </el-table-column>
@@ -879,9 +881,12 @@
                     <span v-if="apiTestResult.schema_matched" class="pm-badge-schema-ok">
                         <i class="fa-solid fa-circle-check"></i> 契约校验通过
                     </span>
-                    <span v-else-if="apiTestResult.schema_error" class="pm-badge-schema-err"
+                    <span v-else-if="apiTestResult.schema_matched === false" class="pm-badge-schema-err"
                         :title="apiTestResult.schema_error">
                         <i class="fa-solid fa-circle-exclamation"></i> 契约不匹配
+                    </span>
+                    <span v-else class="pm-badge-schema-plain" style="color: #94a3b8;">
+                        <i class="fa-solid fa-circle-minus"></i> 契约未配置 (可点击「从当前响应推导」生成)
                     </span>
                     <span v-if="apiTestResult.assertions_summary"
                         :class="apiTestResult.assertions_summary.all_passed ? 'pm-badge-schema-ok' : 'pm-badge-schema-err'"

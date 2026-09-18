@@ -542,16 +542,19 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         body_type=api_http_body_type
     )
 
-    # 执行 Schema 校验
-    schema_matched = False
+    # 执行 Schema 校验 (expected_schema 为空字典时视为"未配置契约", 不参与校验与健康判定)
+    schema_configured = bool(api_expected_schema)
+    schema_matched = None      # None=未配置契约, True=匹配, False=突变
     schema_errors = []
     raw_snippet = None
 
     if json_data is not None:
         raw_snippet = json.dumps(json_data, ensure_ascii=False)[:500]
-        if http_ok:
+        if not schema_configured:
+            schema_matched = None
+        elif http_ok:
             schema_matched, schema_errors = check_schema(json_data, api_expected_schema)
-    else:
+    elif schema_configured:
         schema_matched = False
         schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
 
@@ -586,7 +589,8 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         except Exception as env_err:
             print(f"[Warn] 探针持久化更新环境变量失败: {env_err}")
 
-    is_healthy = bool(http_ok and (http_code == 200) and schema_matched and all_assertions_passed)
+    # 未配置契约时不把 schema 纳入健康判定, 避免空 Schema {} 接受一切导致"永远一致"的假象
+    is_healthy = bool(http_ok and (http_code == 200) and (schema_matched is not False) and all_assertions_passed)
 
     # 4. 快速持久化校验结果与状态变更
     with Session(engine) as session:
@@ -610,7 +614,7 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
                     reasons = []
                     if http_code != 200:
                         reasons.append(f"HTTP状态码({http_code})")
-                    if not schema_matched:
+                    if schema_matched is False:
                         reasons.append("Schema破坏性变更")
                     if not all_assertions_passed:
                         failed_asserts = [a.get("name", "断言失败") for a in assertions_result if not a.get("passed", False)]
@@ -632,7 +636,8 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             circuit_broken=False,
             http_status_code=http_code,
             http_latency_ms=http_ms,
-            schema_matched=schema_matched,
+            # 未配置契约时记录 False (列 NOT NULL), 展示层用接口当前 expected_schema 区分"未配置"
+            schema_matched=bool(schema_matched) if schema_matched is not None else False,
             schema_diff_detail=schema_errors if schema_errors else None,
             assertions_result=assertions_result if assertions_result else None,
             raw_response_snippet=raw_snippet,
@@ -682,7 +687,9 @@ async def execute_probe_for_target(target_id: int) -> ProbeHistory:
         )
         if json_data is not None:
             raw_snippet = json.dumps(json_data, ensure_ascii=False)[:500]
-            if http_ok:
+            if not expected_schema:
+                schema_matched = None   # 未配置契约
+            elif http_ok:
                 schema_matched, schema_errors = check_schema(json_data, expected_schema)
         else:
             schema_matched = False
@@ -691,7 +698,7 @@ async def execute_probe_for_target(target_id: int) -> ProbeHistory:
         schema_matched = False
         schema_errors = [{"field": "$root", "validator": "tcp", "message": tcp_err or "TCP 连接拒绝"}]
 
-    is_healthy = bool(tcp_ok and (http_code == 200) and schema_matched)
+    is_healthy = bool(tcp_ok and (http_code == 200) and (schema_matched is not False))
     now = datetime.utcnow()
 
     # 持久化结果
@@ -714,11 +721,12 @@ async def execute_probe_for_target(target_id: int) -> ProbeHistory:
 
         history = ProbeHistory(
             target_id=target.id,
+            # 旧表列为 NOT NULL: 未配置契约时记录 False (语义区分由接口当前的 expected_schema 提供)
+            schema_matched=bool(schema_matched) if schema_matched is not None else False,
             tcp_ok=tcp_ok,
             tcp_latency_ms=tcp_ms,
             http_status_code=http_code,
             http_latency_ms=http_ms,
-            schema_matched=schema_matched,
             schema_diff_detail=schema_errors if schema_errors else None,
             raw_response_snippet=raw_snippet,
             is_healthy=is_healthy,

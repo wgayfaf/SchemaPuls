@@ -13,9 +13,9 @@
                             <el-form-item label="总开关">
                                 <el-switch v-model="smtpForm.enabled" active-text="启用邮件告警"
                                     inactive-text="邮件告警已关闭" />
-                                <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">
-                                    关闭后，机器离线/恢复将不再发送邮件（探测与页面展示不受影响）
-                                </div>
+<!--                                <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">-->
+<!--                                    关闭后，机器离线/恢复将不再发送邮件（探测与页面展示不受影响）-->
+<!--                                </div>-->
                             </el-form-item>
                             <el-form-item label="SMTP 服务器">
                                 <el-input v-model="smtpForm.host" placeholder="如: smtp.qq.com" />

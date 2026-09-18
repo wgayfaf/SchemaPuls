@@ -62,6 +62,7 @@ def list_apis(
             "auth_type": a.auth_type or "none",
             "auth_config": a.auth_config or {},
             "expected_schema": a.expected_schema,
+            "schema_configured": bool(a.expected_schema),
             "pre_actions": a.pre_actions or [],
             "post_actions": a.post_actions or [],
             "cron_interval_minutes": a.cron_interval_minutes,
@@ -178,6 +179,7 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
 
     schema_matched = None
     schema_errors = []
+    schema_configured = bool(data.expected_schema)
     if data.expected_schema and isinstance(data.expected_schema, dict):
         if json_data is not None:
             schema_matched, schema_errors = check_schema(json_data, data.expected_schema)
@@ -221,6 +223,7 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         "response_headers": resp_headers,
         "response_text": resp_text[:1000] if resp_text else None,
         "schema_matched": schema_matched,
+        "schema_configured": schema_configured,
         "schema_errors": schema_errors,
         "assertions_summary": {
             "all_passed": all_assertions_passed,
@@ -475,11 +478,15 @@ def delete_api(id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/{id}/trigger")
-async def trigger_api_probe(id: int):
+async def trigger_api_probe(id: int, session: Session = Depends(get_session)):
     """手动立即触发对指定接口的业务状态与 Schema 契约校验 (带熔断守卫)"""
     try:
         history = await execute_api_probe(id)
-        return history
+        api = session.get(ApiProbe, id)
+        data = history.model_dump()
+        # 附带契约配置状态, 供前端区分"未配置"与"突变" (历史流水列 NOT NULL 统一记录 False)
+        data["schema_configured"] = bool(api.expected_schema) if api else False
+        return data
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

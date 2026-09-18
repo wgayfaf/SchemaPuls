@@ -1165,16 +1165,22 @@ const handleTriggerApi = async (row) => {
                 message: "宿主机器处于离线状态，接口拨测已熔断并抑制告警！",
                 type: "warning"
             });
-        } else if (data.http_status_code === 200 && data.schema_matched) {
+        } else if (data.http_status_code === 200 && data.is_healthy) {
             ElNotification({
                 title: `接口拨测通过 [${row.name}]`,
                 message: `HTTP 200 (${data.http_latency_ms}ms) | Schema 契约校验完全匹配`,
                 type: "success"
             });
+        } else if (data.http_status_code === 200 && data.is_healthy && data.schema_configured === false) {
+            ElNotification({
+                title: `接口拨测通过 (未配置契约) [${row.name}]`,
+                message: `HTTP 200 (${data.http_latency_ms}ms) | 未配置 Schema 契约，可在编辑弹窗中从响应推导`,
+                type: "success"
+            });
         } else {
             ElNotification({
                 title: `接口探测异常 [${row.name}]`,
-                message: `状态码: ${data.http_status_code || '异常'} | Schema匹配: ${data.schema_matched ? '是' : '未通过'}`,
+                message: `状态码: ${data.http_status_code || '异常'} | Schema匹配: ${data.schema_configured === false ? '未配置' : (data.schema_matched ? '是' : '未通过')}`,
                 type: "error",
                 duration: 6000
             });
