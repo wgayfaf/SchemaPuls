@@ -1,12 +1,13 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
-from app.models import MachineNode, ApiProbe, MonitorTarget
+from app.models import MachineNode, ApiProbe, MonitorTarget, ScenarioProbe
 from app.database import engine
 from app.services.probe_service import (
     execute_machine_probe,
     execute_api_probe,
     execute_probe_for_target
 )
+from app.services.scenario_service import execute_scenario_probe
 from datetime import datetime
 import asyncio
 
@@ -45,6 +46,16 @@ async def scheduled_probe_job(target_id: int):
         pass
     except Exception as e:
         print(f"[Scheduler Target Error] Target {target_id}: {e}")
+
+
+async def scheduled_scenario_job(scenario_id: int):
+    """场景拨测定时执行 (业务链路整链 + 清理步骤 finally 保障)"""
+    try:
+        await execute_scenario_probe(scenario_id, trigger="scheduled")
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"[Scheduler Scenario Error] Scenario {scenario_id}: {e}")
 
 
 # ==========================================================
@@ -110,6 +121,36 @@ def remove_api_job(api_id: int):
         print(f"[Scheduler] Removed api probe id={api_id}")
 
 
+def add_scenario_job(scenario: ScenarioProbe):
+    """向调度器添加或更新一个场景拨测的定时任务 (立即执行一次并按周期持续巡检)"""
+    job_id = f"probe_scenario_{scenario.id}"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+
+    if scenario.is_active and (scenario.cron_interval_minutes or 0) > 0:
+        interval = max(1, scenario.cron_interval_minutes or 1)
+        scheduler.add_job(
+            scheduled_scenario_job,
+            "interval",
+            minutes=interval,
+            next_run_time=datetime.now(),
+            args=[scenario.id],
+            id=job_id,
+            replace_existing=True
+        )
+        print(f"[Scheduler] Registered scenario [{scenario.name}] every {interval}m (Initial run queued immediately)")
+    else:
+        print(f"[Scheduler] Scenario [{scenario.name}] id={scenario.id} is inactive or disabled (not scheduled in cron)")
+
+
+def remove_scenario_job(scenario_id: int):
+    """移除场景拨测的定时任务"""
+    job_id = f"probe_scenario_{scenario_id}"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+        print(f"[Scheduler] Removed scenario id={scenario_id}")
+
+
 def add_target_job(target: MonitorTarget):
     """向下兼容老版平铺目标任务"""
     job_id = f"probe_target_{target.id}"
@@ -150,6 +191,11 @@ def init_scheduler():
         apis = session.exec(select(ApiProbe).where(ApiProbe.is_active == True)).all()
         for a in apis:
             add_api_job(a)
+
+        # 加载启用中的场景拨测
+        scenarios = session.exec(select(ScenarioProbe).where(ScenarioProbe.is_active == True)).all()
+        for s in scenarios:
+            add_scenario_job(s)
 
         # 加载兼容老版目标
         targets = session.exec(select(MonitorTarget).where(MonitorTarget.is_active == True)).all()

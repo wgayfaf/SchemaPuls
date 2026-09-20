@@ -19,6 +19,7 @@ import { addEnvVarRow, copyEnvVarRef, copyFallback, currentEnvMachines, currentE
 import { activeDefaultHeadersCount, addHeaderRow, addParamRow, addPostActionRow, addPreActionRow, apiActiveTab, apiAuthConfig, apiAuthType, apiBodyText, apiBodyType, apiDialogVisible, apiEnvAvgLatency, apiEnvHealthyCount, apiEnvIssueCount, apiEnvOnlineMachineCount, apiEnvTotalCount, apiForm, apiHeadersList, apiInferring, apiIntervalUnit, apiIntervalValue, apiParamsList, apiPostActionsList, apiPreActionsList, apiResponseTab, apiSampleJson, apiSearchQuery, apiSubmitting, apiTestResult, apiTestRunning, applyPostActionPreset, applyPreActionPreset, avgApiLatency, clearBodyJson, copyResponseBody, copyText, createDefaultHeaders, currentEnvApisForKpi, currentEnvMachineOptions, editingApiId, filteredApis, formatBodyJson, formatIfJson, formatIntervalDisplay, formatSampleJson, formatSchemaJson, getEffectiveHeaders, getIntervalTooltip, handleDeleteApi, handleInferApiSchema, handleTestRunApi, handleTriggerApi, healthyApiCount, inferSchemaFromTestResult, insertMacroToBody, isHeaderOverridden, isSyncingUrlParams, issueApiCount, minifyBodyJson, onPostActionTypeChange, openApiMetricsDrawer, openCreateApiDialog, openEditApiDialog, removeHeaderRow, removeParamRow, removePostActionRow, removePreActionRow, safeFormatJson, safeMinifyJson, selectedApiEnv, selectedApiMachine, selectedApiStatus, setQuickInterval, showDefaultHeaders, submitApiForm, syncParamsToPath, syncPathToParams, systemDefaultHeaders, toggleApiActive, triggeringApiId } from './composables/apis'
 import { executeConfirmPostmanImport, goToImportedApisView, handlePostmanFileChange, handlePostmanTextParse, isPostmanApiSelected, onPostmanImportMachineChange, openGenericPostmanImport, openPostmanImportForMachine, postmanConflictPolicy, postmanCronInterval, postmanImportActiveTab, postmanImportDialogVisible, postmanImportLoading, postmanImportMachine, postmanImportMachineId, postmanImportSuccessResult, postmanPreviewData, postmanRawJsonText, postmanSelectedApis, postmanSyncEnvVars, postmanUpdateBaseUrl, resetPostmanImport, togglePostmanApiSelection, toggleSelectAllPostmanApis } from './composables/postman'
 import { copyLabSchema, copySchemaToValidate, handleLabInfer, handleLabValidate, labActiveTab, labInferring, labJsonInput, labSchemaOutput, labStrictMode, labValidateJsonText, labValidateSchemaText, labValidating, labValidationResult, loadValidateSample } from './composables/lab'
+import { activeScenarioDefaultHeadersCount, activeStep, activeStepIndex, addScenarioStep, addStepHeaderRow, addStepParamRow, addStepPostActionRow, addStepPreActionRow, apiImportDialogVisible, apiImportMethodFilter, apiImportSearch, apiImportSelection, apiImportTableRef, applyStepPostActionPreset, applyStepPreActionPreset, clearStepBodyJson, confirmImportApisAsSteps, fetchScenarios, fillActiveStepFromApi, filteredScenarios, formatStepBodyJson, getMethodBadgeStyle, getScenarioStatusBadgeClass, getScenarioStatusText, handleApiImportSelectionChange, handleDeleteScenario, importableApis, isStepHeaderOverridden, minifyStepBodyJson, onStepPathInput, onStepPostActionTypeChange, openApiImportDialog, openCreateScenarioDialog, openEditScenarioDialog, removeScenarioStep, removeStepHeaderRow, removeStepParamRow, removeStepPostActionRow, removeStepPreActionRow, resetScenarioBaseUrlToMachine, scenarioActiveCount, scenarioCleanupCount, scenarioDialogVisible, editingScenarioId, scenarioForm, scenarioIntervalUnit, scenarioIntervalValue, scenarioList, scenarioLoading, scenarioMachineDisplayName, scenarioMachineOptions, scenarioSearchQuery, scenarioStepTotalCount, scenarioSteps, scenarioSubmitting, scenarioSystemDefaultHeaders, scenarioTotalCount, selectScenarioStep, selectedScenarioEnv, setQuickScenarioInterval, showStepDefaultHeaders, stepActiveTab, submitScenarioForm, scenarioRunningId, scenarioResultVisible, scenarioResult, stepTestRunning, stepTestResult, handleRunScenario, getStepResultBadge, handleTestRunStep } from './composables/scenarios'
 
 // 配置 Axios 默认基础 API 路由 (开发环境走 Vite 代理, 生产可用 VITE_API_BASE_URL 指定)
 axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || ''
@@ -37,7 +38,9 @@ axios.interceptors.response.use(
 export function workbenchSetup() {
     onMounted(() => {
         fetchData();
+        fetchScenarios();
         setInterval(fetchData, 15000);
+        setInterval(fetchScenarios, 15000);
         window.addEventListener("resize", () => {
             if (echartsInstance) echartsInstance.resize();
         });
@@ -266,7 +269,81 @@ export function workbenchSetup() {
             setQuickInterval,
             formatIntervalDisplay,
             getIntervalTooltip,
-            toggleApiActive
+            toggleApiActive,
+            // 场景拨测域导出
+            scenarioList,
+            scenarioLoading,
+            scenarioSearchQuery,
+            selectedScenarioEnv,
+            scenarioDialogVisible,
+            editingScenarioId,
+            scenarioSubmitting,
+            scenarioForm,
+            scenarioIntervalValue,
+            scenarioIntervalUnit,
+            setQuickScenarioInterval,
+            scenarioSteps,
+            activeStepIndex,
+            activeStep,
+            stepActiveTab,
+            scenarioMachineOptions,
+            scenarioMachineDisplayName,
+            resetScenarioBaseUrlToMachine,
+            filteredScenarios,
+            scenarioTotalCount,
+            scenarioActiveCount,
+            scenarioCleanupCount,
+            scenarioStepTotalCount,
+            fetchScenarios,
+            addScenarioStep,
+            removeScenarioStep,
+            selectScenarioStep,
+            scenarioSystemDefaultHeaders,
+            showStepDefaultHeaders,
+            activeScenarioDefaultHeadersCount,
+            isStepHeaderOverridden,
+            addStepParamRow,
+            removeStepParamRow,
+            addStepHeaderRow,
+            removeStepHeaderRow,
+            formatStepBodyJson,
+            minifyStepBodyJson,
+            clearStepBodyJson,
+            onStepPathInput,
+            addStepPreActionRow,
+            removeStepPreActionRow,
+            applyStepPreActionPreset,
+            addStepPostActionRow,
+            removeStepPostActionRow,
+            onStepPostActionTypeChange,
+            applyStepPostActionPreset,
+            openCreateScenarioDialog,
+            openEditScenarioDialog,
+            submitScenarioForm,
+            handleDeleteScenario,
+            // 拨测执行引擎导出
+            scenarioRunningId,
+            scenarioResultVisible,
+            scenarioResult,
+            stepTestRunning,
+            stepTestResult,
+            handleRunScenario,
+            getStepResultBadge,
+            handleTestRunStep,
+            // 从接口管理导入接口为链路节点
+            apiImportDialogVisible,
+            apiImportSearch,
+            apiImportMethodFilter,
+            apiImportSelection,
+            apiImportTableRef,
+            importableApis,
+            openApiImportDialog,
+            handleApiImportSelectionChange,
+            confirmImportApisAsSteps,
+            fillActiveStepFromApi,
+            getMethodBadgeStyle,
+            getScenarioStatusBadgeClass,
+            getScenarioStatusText
         };
 
         // 调试与自动化测试全局挂载

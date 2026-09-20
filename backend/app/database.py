@@ -34,9 +34,20 @@ def init_db():
     from app.models import (
         Environment, ServiceGroup, MachineNode, ApiProbe,
         MachineProbeHistory, ApiProbeHistory,
-        MonitorTarget, ProbeHistory, SmtpConfig
+        MonitorTarget, ProbeHistory, SmtpConfig,
+        ScenarioProbe, ScenarioProbeHistory
     )
     # 创建所有四层模型新表以及兼容表
+    # 兼容迁移: 老版本场景历史表 (success/failed_step/steps_result 结构, 旧引擎未上线无业务数据) 重建为新结构
+    with engine.connect() as conn:
+        try:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(scenario_probe_histories)")).fetchall()]
+            if cols and "is_success" not in cols:
+                conn.execute(text("DROP TABLE scenario_probe_histories"))
+                conn.commit()
+                print("[Migration] 旧版 scenario_probe_histories 表结构已重建为新版拨测引擎结构")
+        except Exception:
+            pass
     SQLModel.metadata.create_all(engine)
     
     # 兼容历史老字段迁移
@@ -136,6 +147,7 @@ def init_db():
         try:
             conn.execute(text("DELETE FROM api_probe_histories WHERE api_probe_id NOT IN (SELECT id FROM api_probes)"))
             conn.execute(text("DELETE FROM machine_probe_histories WHERE machine_id NOT IN (SELECT id FROM machine_nodes)"))
+            conn.execute(text("DELETE FROM scenario_probe_histories WHERE scenario_id NOT IN (SELECT id FROM scenario_probes)"))
             conn.execute(text("DELETE FROM monitor_targets WHERE name NOT IN (SELECT name FROM api_probes)"))
             conn.execute(text("DELETE FROM probe_histories WHERE target_id NOT IN (SELECT id FROM monitor_targets)"))
             conn.commit()

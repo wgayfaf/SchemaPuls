@@ -38,6 +38,7 @@ const navTitle = computed(() => {
         case "env_management": return "环境管理";
         case "machine_management": return "机器管理";
         case "api_management": return "接口管理";
+        case "scenario_probe": return "场景拨测";
         case "targets": return "环境与服务拨测工作台";
         case "schema_lab": return "Schema 契约演进实验室";
         case "incidents": return "故障告警排障中心";
@@ -158,6 +159,8 @@ const handleMenuSelect = (key) => {
         currentNav.value = "machine_management";
     } else if (key === "api_management") {
         currentNav.value = "api_management";
+    } else if (key === "scenario_probe") {
+        currentNav.value = "scenario_probe";
     } else if (key.startsWith("targets:")) {
         currentNav.value = "targets";
         selectedGroup.value = key.split(":")[1];

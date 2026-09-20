@@ -137,6 +137,48 @@ class ApiProbeHistory(SQLModel, table=True):
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class ScenarioProbe(SQLModel, table=True):
+    """场景拨测: 业务链路多步骤拨测 (写入 -> 校验 -> 清理 闭环)
+    步骤链以 JSON 存储, 每个步骤为一项独立接口配置:
+      { name, http_method, http_path, http_params, http_headers, http_body_type, http_body,
+        auth_type, auth_config, pre_actions, post_actions, is_cleanup }
+    is_cleanup=True 的步骤为清理步骤, 拨测引擎保证其无论成败均被执行 (finally 语义)
+    步骤间通过共享变量池传递参数: 后置操作的 extract_variable 提取结果存入变量池,
+    后续节点可通过 {{变量名}} 宏在路径/Params/Headers/Body 中直接引用
+    """
+    __tablename__ = "scenario_probes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    machine_id: int = Field(foreign_key="machine_nodes.id", index=True)
+    name: str = Field(max_length=64, index=True)
+    description: Optional[str] = Field(default=None, max_length=255)
+    base_url: Optional[str] = Field(default=None, max_length=255) # 场景基准地址 (优先于宿主机器地址)
+    steps: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 业务链路步骤链
+    cron_interval_minutes: int = Field(default=5)
+    is_active: bool = Field(default=True)
+
+    # 运行状态 (拨测引擎接入后由引擎回写)
+    current_status: str = Field(default="UNKNOWN")      # HEALTHY, DOWN, UNKNOWN
+    last_run_at: Optional[datetime] = None
+    last_total_latency_ms: Optional[float] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ScenarioProbeHistory(SQLModel, table=True):
+    """场景拨测历史流水 (业务链路整链执行记录, 含逐节点明细)"""
+    __tablename__ = "scenario_probe_histories"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    scenario_id: int = Field(foreign_key="scenario_probes.id", index=True)
+    machine_id: int = Field(foreign_key="machine_nodes.id", index=True)
+    trigger: str = Field(default="scheduled")             # scheduled | manual
+    is_success: bool = Field(default=False)               # 所有业务节点全部通过才算成功 (清理步骤不参与判定)
+    total_latency_ms: Optional[float] = None              # 整链总耗时
+    steps_detail: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))  # 逐节点执行明细
+    error_message: Optional[str] = Field(default=None, max_length=500)
+    probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 # ==========================================================
 # 向下兼容旧版单层平铺模型 (保留供历史数据迁移)
 # ==========================================================

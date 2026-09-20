@@ -36,6 +36,10 @@
                             <i class="fa-solid fa-code menu-icon" style="color: #8b5cf6;"></i>
                             <span>接口管理</span>
                         </el-menu-item>
+                        <el-menu-item index="scenario_probe">
+                            <i class="fa-solid fa-route menu-icon" style="color: #f97316;"></i>
+                            <span>场景拨测</span>
+                        </el-menu-item>
                     </el-sub-menu>
 
                     <!-- 一级功能模块 (含二级子菜单): 排障与契约实验室 -->
@@ -118,6 +122,10 @@
                         @click="openCreateApiDialog()">
                         <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建接口
                     </el-button>
+                    <el-button v-else-if="currentNav === 'scenario_probe'" type="primary" size="small"
+                        @click="openCreateScenarioDialog()">
+                        <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建场景
+                    </el-button>
                     <el-button v-else-if="currentNav === 'targets'" type="primary" size="small"
                         @click="openCreateDialog">
                         <i class="fa-solid fa-plus" style="margin-right: 6px;"></i>新建监控目标
@@ -139,6 +147,9 @@
 
                 <!-- 视图: 接口管理 (API Probe Management) -->
                 <ApiManagementView />
+
+                <!-- 视图: 场景拨测 (Scenario Probe, 接口管理副本) -->
+                <ScenarioProbeView />
 
                 <!-- 视图 2: 环境与服务拨测工作台 (Targets) -->
                 <TargetsView />
@@ -177,6 +188,7 @@ import DashboardView from './views/Dashboard.vue'
 import EnvManagementView from './views/EnvManagement.vue'
 import MachineManagementView from './views/MachineManagement.vue'
 import ApiManagementView from './views/ApiManagement.vue'
+import ScenarioProbeView from './views/ScenarioProbe.vue'
 import TargetsView from './views/Targets.vue'
 import SchemaLabView from './views/SchemaLab.vue'
 import IncidentsView from './views/Incidents.vue'
@@ -190,6 +202,7 @@ export default {
         EnvManagementView,
         MachineManagementView,
         ApiManagementView,
+        ScenarioProbeView,
         TargetsView,
         SchemaLabView,
         IncidentsView,
