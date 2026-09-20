@@ -318,10 +318,12 @@
             <el-tag size="small" type="success" effect="plain" style="font-weight: 600;">
                 {{ currentMachineEnvironment.name || '默认环境' }}
             </el-tag>
-            <el-button size="small" type="warning" plain @click="openEnvDialog" style="border-radius: 14px; padding: 2px 10px; height: 24px;">
-                <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>环境变量 ({{ Object.keys(currentMachineEnvironment.variables || {}).length }})
-            </el-button>
+
             <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+            <el-button size="small" type="warning" plain @click="openEnvDialog"
+                       style="border-radius: 14px; padding: 2px 10px; height: 24px;">
+              <i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>环境变量 ({{ Object.keys(currentMachineEnvironment.variables || {}).length }})
+            </el-button>
             <span style="color: #64748b;">
                 机器默认地址:
                 <code
@@ -331,6 +333,8 @@
                 <el-button size="small" link type="primary" @click="resetBaseUrlToMachine">
                     <i class="fa-solid fa-rotate-left" style="margin-right: 2px;"></i>恢复机器地址
                 </el-button>
+            </el-tooltip>
+            <el-tooltip content="查看/编辑宿主机器所属环境的变量池, 节点配置中可用 {{变量名}} 宏直接引用" placement="top">
             </el-tooltip>
         </div>
         <div style="color: #64748b; font-size: 11.5px; display: flex; align-items: center; gap: 4px;">

@@ -287,19 +287,23 @@
                                 style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px; font-size: 12px; border: 1px solid #e2e8f0; flex-wrap: wrap; gap: 8px;">
                                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                     <span style="font-weight: 600; color: #475569;">
-                                        <i class="fa-solid fa-server" style="color: #0284c7; margin-right: 4px;"></i>宿主机器:
+                                        <i class="fa-solid fa-server" style="color: #0284c7; margin-right: 3px;"></i>宿主机器:
                                     </span>
                                     <span style="font-weight: 600; color: #0f172a;">
                                         {{ scenarioMachineDisplayName }}
                                     </span>
-                                    <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+                                    <span style="color: #cbd5e1; margin: 0 3px;">|</span>
                                     <span style="font-weight: 600; color: #475569;">
-                                        <i class="fa-solid fa-layer-group" style="color: #10b981; margin-right: 4px;"></i>所属环境:
+                                        <i class="fa-solid fa-layer-group" style="color: #10b981; margin-right: 3px;"></i>所属环境:
                                     </span>
                                     <el-tag size="small" type="success" effect="plain" style="font-weight: 600;">
                                         {{ currentMachineEnvironment.name || '默认环境' }}
                                     </el-tag>
                                     <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+                                    <el-button size="small" type="warning" plain @click="openEnvDialog"
+                                               style="border-radius: 14px; padding: 2px 6px; height: 24px;">
+                                      <i class="fa-solid fa-sliders" style="margin-right: 3px;"></i>环境变量 ({{ Object.keys(currentMachineEnvironment.variables || {}).length }})
+                                    </el-button>
                                     <span style="color: #64748b;">
                                         机器默认地址:
                                         <code
@@ -309,6 +313,8 @@
                                         <el-button size="small" link type="primary" @click="resetScenarioBaseUrlToMachine">
                                             <i class="fa-solid fa-rotate-left" style="margin-right: 2px;"></i>恢复机器地址
                                         </el-button>
+                                    </el-tooltip>
+                                    <el-tooltip content="查看/编辑宿主机器所属环境的变量池, 节点配置中可用 {{变量名}} 宏直接引用" placement="top">
                                     </el-tooltip>
                                 </div>
                                 <div style="color: #64748b; font-size: 11.5px; display: flex; align-items: center; gap: 4px;">
@@ -1045,6 +1051,7 @@ export default {
             scenarioForm: wb.scenarioForm,
             scenarioMachineOptions: wb.scenarioMachineOptions,
             scenarioMachineDisplayName: wb.scenarioMachineDisplayName,
+            openEnvDialog: wb.openEnvDialog,
             scenarioIntervalValue: wb.scenarioIntervalValue,
             scenarioIntervalUnit: wb.scenarioIntervalUnit,
             setQuickScenarioInterval: wb.setQuickScenarioInterval,
