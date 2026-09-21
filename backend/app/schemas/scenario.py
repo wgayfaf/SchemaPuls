@@ -22,6 +22,7 @@ class ScenarioPayload(BaseModel):
     description: Optional[str] = None
     base_url: Optional[str] = None
     steps: List[Dict[str, Any]] = []
+    variables: Dict[str, Any] = {} # 场景专属初始变量池 (仅限当前场景生效, 隔离防污染)
     cron_interval_minutes: int = 5
     is_active: bool = True
 
@@ -31,3 +32,4 @@ class ScenarioStepTestPayload(BaseModel):
     machine_id: int
     base_url: Optional[str] = None
     step: Dict[str, Any] = {}
+    scenario_variables: Dict[str, Any] = {} # 场景专属变量上下文 (调试时注入)

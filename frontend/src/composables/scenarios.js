@@ -50,12 +50,426 @@ const activeStepIndex = ref(0)
 // 当前选中节点的 Postman 配置 Tab 状态
 const stepActiveTab = ref("params")
 
+// ================= 场景专属变量池 (仅限当前场景生效, 隔离防污染) =================
+// 场景专属变量结构: [{ enabled: true, key: 'userId', value: '1001', description: '用户ID' }]
+const scenarioVariablesList = ref([])
+const scenarioVariablesDrawerVisible = ref(false)
+
+const scenarioVariablesCount = computed(() => {
+    return scenarioVariablesList.value.filter(v => v.key && v.key.trim()).length
+})
+
+const addScenarioVariableRow = () => {
+    scenarioVariablesList.value.push({ enabled: true, key: '', value: '', description: '' })
+}
+
+const removeScenarioVariableRow = (idx) => {
+    scenarioVariablesList.value.splice(idx, 1)
+}
+
+const clearScenarioVariables = () => {
+    scenarioVariablesList.value = []
+}
+
+const getScenarioVariablesObject = () => {
+    const obj = {}
+    for (const item of scenarioVariablesList.value) {
+        if (item.enabled !== false && item.key && item.key.trim()) {
+            obj[item.key.trim()] = item.value !== undefined && item.value !== null ? item.value : ''
+        }
+    }
+    return obj
+}
+
+const setScenarioVariablesFromObject = (obj) => {
+    if (!obj || typeof obj !== 'object') {
+        scenarioVariablesList.value = []
+        return
+    }
+    scenarioVariablesList.value = Object.entries(obj).map(([key, value]) => ({
+        enabled: true,
+        key,
+        value: typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''),
+        description: ''
+    }))
+}
+
+const copyVariableMacro = (key) => {
+    if (!key) return
+    const macro = `{{${key}}}`
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(macro)
+            .then(() => ElMessage.success(`已复制宏变量: ${macro}`))
+            .catch(() => ElMessage.info(`宏变量: ${macro}`))
+    } else {
+        ElMessage.info(`宏变量: ${macro}`)
+    }
+}
+
 // ================= 拨测执行引擎交互状态 =================
 const scenarioRunningId = ref(null)          // 正在手动执行的场景 id (按钮 loading)
 const scenarioResultVisible = ref(false)     // 执行结果抽屉
 const scenarioResult = ref(null)             // 最近一次执行的历史流水 (含逐节点明细)
 const stepTestRunning = ref(false)           // 单节点调试发包中
 const stepTestResult = ref(null)             // 单节点调试结果
+
+// ================= 节点调试响应面板: 场景专属变量提取器 & 跨接口引用助手 =================
+const stepResponseTab = ref('body')          // 'body' (响应体) | 'extract' (提取场景变量)
+const stepExtractedVarNames = ref({})        // 路径对应自定义变量名缓存: { 'data.token': 'token' }
+const customExtractPath = ref('')            // 自定义提取路径输入框: 如 data.items[0].id
+const customExtractVarName = ref('')         // 自定义提取变量名输入框: 如 firstItemId
+
+const safeParseJson = (str) => {
+    if (!str || typeof str !== 'string') return null
+    try {
+        return JSON.parse(str)
+    } catch {
+        return null
+    }
+}
+
+// 获取当前调试响应的 JSON 数据对象
+const getStepResponseJsonObject = () => {
+    if (!stepTestResult.value) return null
+    if (stepTestResult.value.response_data && typeof stepTestResult.value.response_data === 'object') {
+        return stepTestResult.value.response_data
+    }
+    return safeParseJson(stepTestResult.value.response_snippet)
+}
+
+// 格式化输出完整的响应体 JSON
+const getStepResponseFormattedBody = computed(() => {
+    if (!stepTestResult.value) return ''
+    if (stepTestResult.value.response_data !== undefined && stepTestResult.value.response_data !== null) {
+        try {
+            return JSON.stringify(stepTestResult.value.response_data, null, 2)
+        } catch {
+            return String(stepTestResult.value.response_data)
+        }
+    }
+    if (stepTestResult.value.response_snippet) {
+        try {
+            const parsed = JSON.parse(stepTestResult.value.response_snippet)
+            return JSON.stringify(parsed, null, 2)
+        } catch {
+            return stepTestResult.value.response_snippet
+        }
+    }
+    return stepTestResult.value.error ? '无响应内容' : '该请求未返回有效响应体'
+})
+
+// 智能推测字段对应的变量名
+const getSuggestedVarName = (path) => {
+    if (!path) return 'var'
+    const clean = path.replace(/\[\d+\]/g, '')
+    const parts = clean.split('.').filter(Boolean)
+    if (parts.length === 0) return 'var'
+    if (parts.length === 1) return parts[0]
+    const last = parts[parts.length - 1]
+    const secondLast = parts[parts.length - 2]
+    if (['id', 'name', 'code', 'status', 'token', 'key', 'val'].includes(last.toLowerCase()) && secondLast && secondLast !== 'data') {
+        return secondLast + last.charAt(0).toUpperCase() + last.slice(1)
+    }
+    return last
+}
+
+// 递归遍历响应体，提取所有叶子字段路径及其当前采样值
+const extractJsonLeafPaths = (data, maxDepth = 4, maxItems = 40) => {
+    const list = []
+    if (data === null || data === undefined || typeof data !== 'object') {
+        return list
+    }
+
+    const walk = (obj, path = '', depth = 1) => {
+        if (list.length >= maxItems || depth > maxDepth) return
+        if (obj === null || obj === undefined) {
+            list.push({ path, value: obj, type: 'null' })
+            return
+        }
+        if (Array.isArray(obj)) {
+            if (obj.length === 0) {
+                list.push({ path, value: '[]', type: 'array' })
+                return
+            }
+            if (typeof obj[0] !== 'object' || obj[0] === null) {
+                list.push({ path: `${path}[0]`, value: obj[0], type: typeof obj[0] })
+            } else {
+                walk(obj[0], `${path}[0]`, depth + 1)
+            }
+            return
+        }
+        if (typeof obj === 'object') {
+            for (const [k, v] of Object.entries(obj)) {
+                if (list.length >= maxItems) break
+                const currentPath = path ? `${path}.${k}` : k
+                if (v !== null && typeof v === 'object') {
+                    if (Array.isArray(v)) {
+                        if (v.length === 0) {
+                            list.push({ path: currentPath, value: '[]', type: 'array' })
+                        } else if (typeof v[0] !== 'object' || v[0] === null) {
+                            list.push({ path: `${currentPath}[0]`, value: v[0], type: typeof v[0] })
+                        } else {
+                            walk(v[0], `${currentPath}[0]`, depth + 1)
+                        }
+                    } else {
+                        walk(v, currentPath, depth + 1)
+                    }
+                } else {
+                    list.push({ path: currentPath, value: v, type: typeof v })
+                }
+            }
+        }
+    }
+
+    walk(data)
+    return list
+}
+
+// 响应面板解析出的所有可提取字段列表
+const stepExtractableFields = computed(() => {
+    const obj = getStepResponseJsonObject()
+    if (!obj) return []
+    const leaves = extractJsonLeafPaths(obj)
+    return leaves.map(item => {
+        const defaultName = getSuggestedVarName(item.path)
+        if (!stepExtractedVarNames.value[item.path]) {
+            stepExtractedVarNames.value[item.path] = defaultName
+        }
+        return {
+            ...item,
+            suggestedVarName: defaultName
+        }
+    })
+})
+
+// 根据路径评估对象值 (支持点分与 [0] 下标)
+const evaluatePathValue = (obj, path) => {
+    if (!obj || !path) return undefined
+    try {
+        const normalized = path.replace(/\[(\d+)\]/g, '.$1').replace(/^\./, '')
+        const keys = normalized.split('.').filter(Boolean)
+        let curr = obj
+        for (const k of keys) {
+            if (curr === null || curr === undefined) return undefined
+            curr = curr[k]
+        }
+        return curr
+    } catch {
+        return undefined
+    }
+}
+
+// 自定义路径提取实时预览
+const customExtractPreview = computed(() => {
+    if (!customExtractPath.value || !customExtractPath.value.trim()) return null
+    const obj = getStepResponseJsonObject()
+    if (!obj) return null
+    const val = evaluatePathValue(obj, customExtractPath.value.trim())
+    return val !== undefined ? val : null
+})
+
+// 检查某个字段或变量名是否已在当前节点的 post_actions 中配置提取
+const isFieldExtractedInActiveStep = (path, varName) => {
+    if (!activeStep.value || !activeStep.value.post_actions) return false
+    return activeStep.value.post_actions.some(
+        a => a.enabled && a.type === 'extract_variable' && (a.expression === path || a.target_value === varName)
+    )
+}
+
+// 一键将响应预览中的字段设为场景专属变量
+const quickExtractFieldToScenarioVariable = (item) => {
+    if (!activeStep.value) {
+        ElMessage.warning('请先在业务链路中选中当前节点')
+        return
+    }
+    const path = item.path
+    const varName = (stepExtractedVarNames.value[path] || item.suggestedVarName || item.customVarName || '').trim()
+    if (!varName) {
+        ElMessage.warning('场景变量名不能为空')
+        return
+    }
+
+    // 1. 注入当前节点的后置操作 (extract_variable)，确保场景后续运行能自动执行动态提取
+    if (!activeStep.value.post_actions) {
+        activeStep.value.post_actions = []
+    }
+    const existingAction = activeStep.value.post_actions.find(
+        a => a.type === 'extract_variable' && (a.target_value === varName || a.expression === path)
+    )
+    if (existingAction) {
+        existingAction.enabled = true
+        existingAction.expression = path
+        existingAction.target_value = varName
+        existingAction.name = `提取 ${varName}`
+    } else {
+        activeStep.value.post_actions.push({
+            enabled: true,
+            name: `提取 ${varName}`,
+            type: 'extract_variable',
+            expression: path,
+            operator: 'equals',
+            target_value: varName
+        })
+    }
+
+    // 2. 将当前调试采样值同步写入场景专属变量池 (仅限当前场景有效, 隔离防污染)
+    const stringVal = typeof item.value === 'object' ? JSON.stringify(item.value) : String(item.value ?? '')
+    const existingVar = scenarioVariablesList.value.find(v => v.key === varName)
+    const stepLabel = `节点 ${(activeStepIndex.value + 1)} (${activeStep.value.name || '步骤'})`
+    if (existingVar) {
+        existingVar.value = stringVal
+        existingVar.enabled = true
+        existingVar.description = `来自 ${stepLabel} 响应 [${path}]`
+    } else {
+        scenarioVariablesList.value.push({
+            enabled: true,
+            key: varName,
+            value: stringVal,
+            description: `来自 ${stepLabel} 响应 [${path}]`
+        })
+    }
+
+    ElNotification({
+        title: '场景变量提取成功 (隔离保护生效)',
+        message: `已将响应字段 [${path}] 设为场景变量 {{${varName}}}！可在后续节点的 Body、Params、Headers 或 URL 中一键引用，严格隔离不污染外部环境。`,
+        type: 'success',
+        duration: 4500
+    })
+}
+
+// 自定义路径一键提取为场景专属变量
+const addCustomExtractToScenarioVariable = () => {
+    const path = customExtractPath.value ? customExtractPath.value.trim() : ''
+    const varName = customExtractVarName.value ? customExtractVarName.value.trim() : ''
+    if (!path) {
+        ElMessage.warning('请输入提取表达式 (如 data.token 或 items[0].id)')
+        return
+    }
+    if (!varName) {
+        ElMessage.warning('请输入场景专属变量名')
+        return
+    }
+    const val = customExtractPreview.value
+    quickExtractFieldToScenarioVariable({
+        path,
+        value: val !== undefined ? val : '',
+        customVarName: varName
+    })
+    customExtractPath.value = ''
+    customExtractVarName.value = ''
+}
+
+// ================= 跨接口/后续接口一键使用场景专属变量 =================
+// 1. 插入到请求 Body (JSON 或 Form)
+const insertScenarioVarToStepBody = (varKey) => {
+    if (!activeStep.value) return
+    if (!varKey) return
+    const macro = `{{${varKey}}}`
+
+    // 若当前光标在 textarea 中, 直接在光标处插入
+    const textarea = document.querySelector('.pm-code-box textarea')
+    if (textarea && document.activeElement === textarea) {
+        const start = textarea.selectionStart || 0
+        const end = textarea.selectionEnd || 0
+        const text = activeStep.value.http_body || ''
+        activeStep.value.http_body = text.substring(0, start) + macro + text.substring(end)
+        ElMessage.success(`已在光标处插入宏变量: ${macro}`)
+        return
+    }
+
+    // 若 Body 为空, 初始化为标准包含该变量的 JSON
+    const bodyStr = (activeStep.value.http_body || '').trim()
+    if (!bodyStr || bodyStr === '{}') {
+        activeStep.value.http_body = JSON.stringify({ [varKey]: macro }, null, 2)
+        ElMessage.success(`已在 Body 中初始化插入 "${varKey}": "${macro}"`)
+        return
+    }
+
+    // 若当前 Body 为合法 JSON 对象, 智能追加或更新该字段
+    try {
+        const parsed = JSON.parse(bodyStr)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            parsed[varKey] = macro
+            activeStep.value.http_body = JSON.stringify(parsed, null, 2)
+            ElMessage.success(`已在 Body 中合并字段 "${varKey}": "${macro}"`)
+            return
+        }
+    } catch {
+        // 非合规 JSON, 文本末尾追加
+    }
+
+    activeStep.value.http_body = (activeStep.value.http_body ? activeStep.value.http_body + '\n' : '') + `"${varKey}": "${macro}"`
+    ElMessage.success(`已追加宏变量 ${macro} 到 Body`)
+}
+
+// 2. 插入到 URL Params
+const insertScenarioVarToStepParam = (varKey) => {
+    if (!activeStep.value) return
+    if (!varKey) return
+    if (!activeStep.value.http_params) activeStep.value.http_params = []
+    const macro = `{{${varKey}}}`
+    activeStep.value.http_params.push({
+        enabled: true,
+        key: varKey,
+        value: macro,
+        description: '引用场景专属变量'
+    })
+    syncStepParamsToPath()
+    ElMessage.success(`已添加参数: ${varKey}=${macro}`)
+}
+
+// 3. 插入到 Headers
+const insertScenarioVarToStepHeader = (varKey, type = 'custom') => {
+    if (!activeStep.value) return
+    if (!varKey) return
+    if (!activeStep.value.http_headers) activeStep.value.http_headers = []
+    const macro = `{{${varKey}}}`
+
+    let headerKey = varKey
+    let headerVal = macro
+    let desc = '引用场景专属变量'
+
+    if (type === 'bearer') {
+        headerKey = 'Authorization'
+        headerVal = `Bearer ${macro}`
+        desc = 'Bearer Token (场景变量)'
+    } else if (type === 'token') {
+        headerKey = 'token'
+        headerVal = macro
+    }
+
+    const existing = activeStep.value.http_headers.find(h => h.key && h.key.toLowerCase() === headerKey.toLowerCase())
+    if (existing) {
+        existing.value = headerVal
+        existing.enabled = true
+        ElMessage.success(`已更新请求头: ${headerKey}: ${headerVal}`)
+    } else {
+        activeStep.value.http_headers.push({
+            enabled: true,
+            key: headerKey,
+            value: headerVal,
+            description: desc
+        })
+        ElMessage.success(`已添加请求头: ${headerKey}: ${headerVal}`)
+    }
+}
+
+// 4. 插入到 URL 路径 (Path)
+const insertScenarioVarToStepPath = (varKey) => {
+    if (!activeStep.value) return
+    if (!varKey) return
+    const macro = `{{${varKey}}}`
+    const current = (activeStep.value.http_path || '').trim()
+    if (!current || current === '/') {
+        activeStep.value.http_path = `/${macro}`
+    } else if (current.includes('?')) {
+        const [p, q] = current.split('?')
+        activeStep.value.http_path = `${p.endsWith('/') ? p : p + '/'}${macro}?${q}`
+    } else {
+        activeStep.value.http_path = `${current.endsWith('/') ? current : current + '/'}${macro}`
+    }
+    ElMessage.success(`已插入宏变量 ${macro} 到请求路径`)
+}
 
 // ================= 数据获取 =================
 const fetchScenarios = async () => {
@@ -219,7 +633,8 @@ const removeScenarioStep = (idx) => {
 const selectScenarioStep = (idx) => {
     activeStepIndex.value = idx
     stepActiveTab.value = "params"
-    stepTestResult.value = null
+    stepTestResult.value = activeStep.value?._testResult || null
+    stepResponseTab.value = "body"
 }
 
 // ================= 机器联动: 自动填充基准地址与环境变量 =================
@@ -664,7 +1079,8 @@ const handleTestRunStep = async () => {
         const res = await axios.post('/api/scenarios/test-step', {
             machine_id: scenarioForm.value.machine_id,
             base_url: scenarioForm.value.base_url ? scenarioForm.value.base_url.trim() : null,
-            step: buildStepPayload(activeStep.value)
+            step: buildStepPayload(activeStep.value),
+            scenario_variables: getScenarioVariablesObject()
         })
         stepTestResult.value = res.data
         if (activeStep.value) {
@@ -676,12 +1092,24 @@ const handleTestRunStep = async () => {
         } else {
             ElMessage.warning(`节点调试未通过: ${res.data.error || '断言未全部通过'} (HTTP ${res.data.status_code ?? '-'})`)
         }
-        // 同步调试产生的环境变量回当前机器环境上下文
-        if (res.data.environment && res.data.environment.updated_variables && Object.keys(res.data.environment.updated_variables).length > 0) {
-            currentMachineEnvironment.value.variables = res.data.environment.variables || {}
+        // 关键增强：将提取的场景变量同步到当前对话框的场景变量池中 (场景内隔离生效，绝不污染全局环境)
+        if (res.data.extracted_scenario_variables && Object.keys(res.data.extracted_scenario_variables).length > 0) {
+            for (const [k, v] of Object.entries(res.data.extracted_scenario_variables)) {
+                const existing = scenarioVariablesList.value.find(item => item.key === k)
+                if (existing) {
+                    existing.value = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')
+                } else {
+                    scenarioVariablesList.value.push({
+                        enabled: true,
+                        key: k,
+                        value: typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''),
+                        description: `节点 ${(activeStepIndex.value + 1)} 调试自动提取`
+                    })
+                }
+            }
             ElNotification({
-                title: '环境变量已同步',
-                message: `调试提取的 ${Object.keys(res.data.environment.updated_variables).length} 个变量已持久化至环境【${res.data.environment.name}】`,
+                title: '场景变量已捕获 (场景内隔离生效)',
+                message: `节点调试提取了 ${Object.keys(res.data.extracted_scenario_variables).length} 个场景变量，已同步至场景专属变量池（仅本场景可用，不污染外部环境）`,
                 type: 'success',
                 duration: 4000
             })
@@ -786,6 +1214,7 @@ const resetScenarioForm = () => {
     stepTestResult.value = null
     scenarioSystemDefaultHeaders.value = createScenarioDefaultHeaders()
     showStepDefaultHeaders.value = false
+    scenarioVariablesList.value = []
     if (mId) fetchMachineEnvironment(mId)
 }
 
@@ -817,6 +1246,9 @@ const openEditScenarioDialog = (row) => {
         scenarioIntervalValue.value = mins
         scenarioIntervalUnit.value = "minutes"
     }
+    // 加载场景专属初始变量池
+    setScenarioVariablesFromObject(row.variables || {})
+
     // 深拷贝步骤链, 保证每个节点具备完整字段结构 (与接口配置区数据结构一致)
     scenarioSteps.value = (row.steps || []).map(s => ({
         name: s.name || '',
@@ -886,6 +1318,7 @@ const submitScenarioForm = async () => {
         description: scenarioForm.value.description ? scenarioForm.value.description.trim() : null,
         base_url: scenarioForm.value.base_url ? scenarioForm.value.base_url.trim() : null,
         steps: buildStepsPayload(),
+        variables: getScenarioVariablesObject(),
         cron_interval_minutes: finalIntervalMinutes,
         is_active: scenarioForm.value.is_active !== false
     }
@@ -1111,5 +1544,12 @@ export {
     getMethodBadgeStyle, getScenarioStatusBadgeClass, getScenarioStatusText,
     scenarioMetricsDrawerVisible, scenarioMetricsLoading, activeScenarioMetrics, scenarioHistoryList,
     openScenarioMetricsDrawer, renderScenarioChart,
-    expandedScenarioStepIds, isScenarioStepsExpanded, toggleScenarioStepsExpand, isAllScenarioStepsExpanded, toggleAllScenarioStepsExpand
+    expandedScenarioStepIds, isScenarioStepsExpanded, toggleScenarioStepsExpand, isAllScenarioStepsExpanded, toggleAllScenarioStepsExpand,
+    scenarioVariablesList, scenarioVariablesDrawerVisible, scenarioVariablesCount,
+    addScenarioVariableRow, removeScenarioVariableRow, clearScenarioVariables,
+    getScenarioVariablesObject, setScenarioVariablesFromObject, copyVariableMacro,
+    stepResponseTab, stepExtractedVarNames, customExtractPath, customExtractVarName,
+    customExtractPreview, stepExtractableFields, getStepResponseFormattedBody,
+    isFieldExtractedInActiveStep, quickExtractFieldToScenarioVariable, addCustomExtractToScenarioVariable,
+    insertScenarioVarToStepBody, insertScenarioVarToStepParam, insertScenarioVarToStepHeader, insertScenarioVarToStepPath
 }

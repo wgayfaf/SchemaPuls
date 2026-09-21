@@ -145,10 +145,21 @@ def init_db():
 
         scenario_columns_to_add = [
             ("last_schema_matched", "BOOLEAN"),
+            ("variables", "TEXT DEFAULT '{}'"),
         ]
         for col_name, col_def in scenario_columns_to_add:
             try:
                 conn.execute(text(f"ALTER TABLE scenario_probes ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
+
+        scenario_history_columns_to_add = [
+            ("scenario_variables", "TEXT DEFAULT '{}'"),
+        ]
+        for col_name, col_def in scenario_history_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE scenario_probe_histories ADD COLUMN {col_name} {col_def}"))
                 conn.commit()
             except Exception:
                 pass

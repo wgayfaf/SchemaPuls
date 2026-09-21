@@ -78,7 +78,15 @@
                             <el-table-column label="场景名称" min-width="160">
                                 <template #default="{ row }">
                                     <div style="display: flex; flex-direction: column;">
-                                        <div style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</div>
+                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                            <span style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</span>
+                                            <el-tag v-if="row.variables && Object.keys(row.variables).length"
+                                                size="small" type="primary" effect="plain"
+                                                style="font-size: 10px; height: 18px; padding: 0 4px; border-radius: 4px;"
+                                                title="已配置场景专属变量 (隔离生效)">
+                                                <i class="fa-solid fa-cube" style="margin-right: 2px;"></i>{{ Object.keys(row.variables).length }} 个变量
+                                            </el-tag>
+                                        </div>
                                         <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
                                             <i class="fa-solid fa-server" style="color: #10b981; margin-right: 4px;"></i>{{ row.machine_name || ('机器#' + row.machine_id) }}
                                             <span v-if="row.description" style="color: #94a3b8; margin-left: 6px;">· {{ row.description }}</span>
@@ -520,6 +528,11 @@
                                                style="border-radius: 14px; padding: 2px 6px; height: 24px;">
                                       <i class="fa-solid fa-sliders" style="margin-right: 3px;"></i>环境变量 ({{ Object.keys(currentMachineEnvironment.variables || {}).length }})
                                     </el-button>
+                                    <span style="color: #cbd5e1; margin: 0 4px;">|</span>
+                                    <el-button size="small" type="primary" plain @click="scenarioVariablesDrawerVisible = true"
+                                               style="border-radius: 14px; padding: 2px 8px; height: 24px; font-weight: 600; border-color: #3b82f6; color: #1d4ed8; background: #eff6ff;">
+                                      <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>场景专属变量 ({{ scenarioVariablesCount }})
+                                    </el-button>
                                     <span style="color: #64748b;">
                                         机器默认地址:
                                         <co
@@ -536,6 +549,52 @@
                                 <div style="color: #64748b; font-size: 11.5px; display: flex; align-items: center; gap: 4px;">
                                     <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i>
                                     <span>正在配置: <b style="color: #c2410c;">节点 {{ activeStepIndex + 1 }}</b> (切换节点仅更换数据, 界面保持不变)</span>
+                                </div>
+                            </div>
+
+                            <!-- 场景专属变量快速参考与一键引用栏 (支持点击一键插入 Body/URL/Params/Headers) -->
+                            <div v-if="scenarioVariablesList.length > 0"
+                                style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; margin-bottom: 8px; font-size: 11.5px; flex-wrap: wrap;">
+                                <span style="font-weight: 600; color: #1d4ed8; display: flex; align-items: center; gap: 4px; font-size: 11.5px;">
+                                    <i class="fa-solid fa-cube"></i>场景专属变量:
+                                </span>
+                                <el-dropdown trigger="click" v-for="item in scenarioVariablesList" :key="item.key" v-show="item.key">
+                                    <span
+                                        style="cursor: pointer; background: #ffffff; border: 1px solid #93c5fd; color: #2563eb; padding: 2px 8px; border-radius: 4px; font-family: monospace; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
+                                        :title="'变量值: ' + (item.value || '空')">
+                                        <span>&#123;&#123;{{ item.key }}&#125;&#125;</span>
+                                        <i class="fa-solid fa-caret-down" style="font-size: 9px; opacity: 0.6;"></i>
+                                    </span>
+                                    <template #dropdown>
+                                        <el-dropdown-menu>
+                                            <div style="padding: 5px 12px; font-size: 11px; color: #475569; background: #f8fafc; border-bottom: 1px solid #e2e8f0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                当前值: <b style="color: #0284c7; font-family: monospace;">{{ item.value || '（空）' }}</b>
+                                            </div>
+                                            <el-dropdown-item @click="copyVariableMacro(item.key)">
+                                                <i class="fa-regular fa-copy" style="margin-right: 6px; color: #64748b;"></i>复制宏 &#123;&#123;{{ item.key }}&#125;&#125;
+                                            </el-dropdown-item>
+                                            <el-dropdown-item @click="insertScenarioVarToStepBody(item.key)">
+                                                <i class="fa-solid fa-code" style="margin-right: 6px; color: #10b981;"></i>插入到请求 Body (JSON)
+                                            </el-dropdown-item>
+                                            <el-dropdown-item @click="insertScenarioVarToStepPath(item.key)">
+                                                <i class="fa-solid fa-link" style="margin-right: 6px; color: #3b82f6;"></i>追加到 URL 路径
+                                            </el-dropdown-item>
+                                            <el-dropdown-item @click="insertScenarioVarToStepParam(item.key)">
+                                                <i class="fa-solid fa-list-check" style="margin-right: 6px; color: #f59e0b;"></i>添加为 URL Query 参数
+                                            </el-dropdown-item>
+                                            <el-dropdown-item @click="insertScenarioVarToStepHeader(item.key, 'bearer')">
+                                                <i class="fa-solid fa-key" style="margin-right: 6px; color: #8b5cf6;"></i>设为 Authorization Bearer
+                                            </el-dropdown-item>
+                                        </el-dropdown-menu>
+                                    </template>
+                                </el-dropdown>
+                                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                                    <span style="color: #64748b; font-size: 10.5px;">
+                                        点击变量可直接插入 Body / URL / 参数
+                                    </span>
+                                    <el-button size="small" link type="primary" @click="scenarioVariablesDrawerVisible = true" style="font-size: 11px;">
+                                        <i class="fa-solid fa-sliders" style="margin-right: 3px;"></i>管理变量 ({{ scenarioVariablesCount }})
+                                    </el-button>
                                 </div>
                             </div>
 
@@ -577,9 +636,30 @@
                                             <i class="fa-solid fa-arrows-rotate" style="margin-right: 4px; color: #3b82f6;"></i>参数与上方
                                             URL Query 参数已双向实时同步 (勾选启用/禁用)
                                         </span>
-                                        <el-button size="small" type="primary" plain @click="addStepParamRow">
-                                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加参数
-                                        </el-button>
+                                        <div style="display: flex; gap: 6px;">
+                                            <el-dropdown trigger="click" @command="insertScenarioVarToStepParam" v-if="scenarioVariablesList.length > 0">
+                                                <el-button size="small" type="success" plain title="一键将场景专属变量添加为 URL Query 参数">
+                                                    <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>+ 插入场景变量
+                                                    <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                                </el-button>
+                                                <template #dropdown>
+                                                    <el-dropdown-menu>
+                                                        <div style="padding: 5px 12px; font-size: 11px; font-weight: 700; color: #1e40af; background: #eff6ff; border-bottom: 1px solid #dbeafe;">
+                                                            选择要添加为 Query 参数的场景变量:
+                                                        </div>
+                                                        <el-dropdown-item v-for="v in scenarioVariablesList" :key="v.key" :command="v.key" :disabled="!v.key">
+                                                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 200px;">
+                                                                <code style="color: #2563eb; font-weight: 700;">{{ v.key }}=&#123;&#123;{{ v.key }}&#125;&#125;</code>
+                                                                <span style="color: #64748b; font-size: 11px;">{{ v.value ? '值: ' + v.value : '' }}</span>
+                                                            </div>
+                                                        </el-dropdown-item>
+                                                    </el-dropdown-menu>
+                                                </template>
+                                            </el-dropdown>
+                                            <el-button size="small" type="primary" plain @click="addStepParamRow">
+                                                <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加参数
+                                            </el-button>
+                                        </div>
                                     </div>
                                     <table class="pm-kv-table">
                                         <thead>
@@ -629,9 +709,38 @@
                                                 <i class="fa-solid fa-circle-info" style="margin-right: 3px;"></i>发包时系统将自动注入默认请求头，输入同名自定义请求头可直接覆盖
                                             </span>
                                         </div>
-                                        <el-button size="small" type="primary" plain @click="addStepHeaderRow">
-                                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加自定义请求头
-                                        </el-button>
+                                        <div style="display: flex; gap: 6px;">
+                                            <el-dropdown trigger="click" @command="(cmd) => insertScenarioVarToStepHeader(cmd.key, cmd.type)" v-if="scenarioVariablesList.length > 0">
+                                                <el-button size="small" type="success" plain title="一键将提取的场景变量应用到请求头 (如 Authorization Bearer)">
+                                                    <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>+ 引用场景变量
+                                                    <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                                </el-button>
+                                                <template #dropdown>
+                                                    <el-dropdown-menu>
+                                                        <div style="padding: 5px 12px; font-size: 11px; font-weight: 700; color: #1e40af; background: #eff6ff; border-bottom: 1px solid #dbeafe;">
+                                                            选择要引用到请求头的场景变量:
+                                                        </div>
+                                                        <template v-for="v in scenarioVariablesList" :key="v.key">
+                                                            <el-dropdown-item :command="{ key: v.key, type: 'bearer' }">
+                                                                <i class="fa-solid fa-key" style="color: #f59e0b; margin-right: 6px;"></i>
+                                                                <span>Authorization: Bearer &#123;&#123;{{ v.key }}&#125;&#125;</span>
+                                                            </el-dropdown-item>
+                                                            <el-dropdown-item :command="{ key: v.key, type: 'token' }">
+                                                                <i class="fa-solid fa-ticket" style="color: #0284c7; margin-right: 6px;"></i>
+                                                                <span>token: &#123;&#123;{{ v.key }}&#125;&#125;</span>
+                                                            </el-dropdown-item>
+                                                            <el-dropdown-item :command="{ key: v.key, type: 'custom' }">
+                                                                <i class="fa-solid fa-heading" style="color: #3b82f6; margin-right: 6px;"></i>
+                                                                <span>{{ v.key }}: &#123;&#123;{{ v.key }}&#125;&#125;</span>
+                                                            </el-dropdown-item>
+                                                        </template>
+                                                    </el-dropdown-menu>
+                                                </template>
+                                            </el-dropdown>
+                                            <el-button size="small" type="primary" plain @click="addStepHeaderRow">
+                                                <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加自定义请求头
+                                            </el-button>
+                                        </div>
                                     </div>
 
                                     <!-- 默认请求头折叠时的 Postman 风格快捷提醒条 -->
@@ -710,6 +819,30 @@
                                         </el-radio-group>
                                         <div style="flex: 1;"></div>
                                         <div v-if="activeStep.http_body_type === 'json'" style="display: flex; gap: 6px;">
+                                            <el-dropdown trigger="click" @command="insertScenarioVarToStepBody" v-if="scenarioVariablesList.length > 0">
+                                                <el-button size="small" type="success" plain title="在请求 Body 中一键插入或追加前面步骤提取的场景专属变量">
+                                                    <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>+ 插入场景变量
+                                                    <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                                </el-button>
+                                                <template #dropdown>
+                                                    <el-dropdown-menu>
+                                                        <div style="padding: 5px 12px; font-size: 11px; font-weight: 700; color: #1e40af; background: #eff6ff; border-bottom: 1px solid #dbeafe;">
+                                                            <i class="fa-solid fa-shield-halved" style="margin-right: 4px;"></i>场景专属变量 (可直接用于 Body)
+                                                        </div>
+                                                        <el-dropdown-item v-for="v in scenarioVariablesList" :key="v.key" :command="v.key" :disabled="!v.key">
+                                                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 220px;">
+                                                                <code style="color: #2563eb; font-weight: 700;">&#123;&#123;{{ v.key }}&#125;&#125;</code>
+                                                                <span style="color: #64748b; font-size: 11px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                                    {{ v.value ? '值: ' + v.value : '（空值）' }}
+                                                                </span>
+                                                            </div>
+                                                        </el-dropdown-item>
+                                                        <el-dropdown-item divided @click="scenarioVariablesDrawerVisible = true">
+                                                            <span style="color: #64748b; font-size: 11.5px;"><i class="fa-solid fa-sliders" style="margin-right: 4px;"></i>管理全部场景变量...</span>
+                                                        </el-dropdown-item>
+                                                    </el-dropdown-menu>
+                                                </template>
+                                            </el-dropdown>
                                             <el-button size="small" type="primary" plain @click="formatStepBodyJson">
                                                 <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>格式化 JSON
                                             </el-button>
@@ -719,6 +852,21 @@
                                             <el-button size="small" plain @click="clearStepBodyJson" title="清空请求体">
                                                 <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>清空
                                             </el-button>
+                                        </div>
+                                        <div v-else-if="activeStep.http_body_type === 'form'" style="display: flex; gap: 6px;">
+                                            <el-dropdown trigger="click" @command="insertScenarioVarToStepBody" v-if="scenarioVariablesList.length > 0">
+                                                <el-button size="small" type="success" plain title="在表单中一键追加场景专属变量">
+                                                    <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>+ 插入场景变量
+                                                    <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                                </el-button>
+                                                <template #dropdown>
+                                                    <el-dropdown-menu>
+                                                        <el-dropdown-item v-for="v in scenarioVariablesList" :key="v.key" :command="v.key" :disabled="!v.key">
+                                                            &#123;&#123;{{ v.key }}&#125;&#125;
+                                                        </el-dropdown-item>
+                                                    </el-dropdown-menu>
+                                                </template>
+                                            </el-dropdown>
                                         </div>
                                     </div>
 
@@ -1071,16 +1219,34 @@
                                                 <i :class="stepTestResult.assertions_summary.all_passed ? 'fa-solid fa-circle-check' : 'fa-solid fa-circle-xmark'"></i>
                                                 断言 {{ stepTestResult.assertions_summary.passed_count }}/{{ stepTestResult.assertions_summary.total }}
                                             </span>
-                                            <span v-if="Object.keys(stepTestResult.extracted_variables || {}).length"
-                                                class="pm-badge-schema-ok" style="background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
-                                                <i class="fa-solid fa-link"></i> 提取变量: {{ Object.keys(stepTestResult.extracted_variables).join(', ') }}
-                                            </span>
                                         </template>
                                     </div>
+
+                                    <!-- 响应视图切换: 响应体 vs 提取场景变量 -->
+                                    <div v-if="stepTestResult" style="display: flex; align-items: center; gap: 8px;">
+                                        <el-radio-group v-model="stepResponseTab" size="small">
+                                            <el-radio-button label="body">
+                                                <i class="fa-solid fa-file-code" style="margin-right: 4px;"></i>响应体 (Body)
+                                            </el-radio-button>
+                                            <el-radio-button label="extract">
+                                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px; color: #3b82f6;"></i>提取场景变量
+                                                <span v-if="stepExtractableFields.length"
+                                                    style="background: #2563eb; color: #fff; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 4px;">
+                                                    {{ stepExtractableFields.length }}
+                                                </span>
+                                            </el-radio-button>
+                                        </el-radio-group>
+                                        <el-button v-if="stepResponseTab === 'body'" size="small" type="primary" plain
+                                            @click="stepResponseTab = 'extract'" :disabled="!stepExtractableFields.length"
+                                            title="解析响应 JSON，一键将返回字段存为场景专属变量">
+                                            <i class="fa-solid fa-cube" style="margin-right: 4px;"></i>从响应提取场景变量
+                                        </el-button>
+                                    </div>
                                 </div>
+
                                 <div v-if="!stepTestResult" class="pm-response-empty">
                                     <i class="fa-solid fa-paper-plane" style="font-size: 24px; color: #cbd5e1; margin-bottom: 8px; display: block;"></i>
-                                    点击上方【发送调试】对当前节点即时发包, 查看状态码、耗时、断言结果与链路变量提取详情
+                                    点击上方【发送调试】对当前节点即时发包, 查看状态码、耗时、完整响应结果，并直接从响应中提取场景专属变量
                                 </div>
                                 <template v-else>
                                     <div v-if="stepTestResult.request_url" style="padding: 8px 14px 0; font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1090,16 +1256,119 @@
                                     <div v-if="stepTestResult.error" style="margin: 8px 14px 0; padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 12px; color: #dc2626;">
                                         <i class="fa-solid fa-circle-exclamation" style="margin-right: 4px;"></i>{{ stepTestResult.error }}
                                     </div>
-                                    <pre class="pm-response-body">{{ stepTestResult.response_snippet || (stepTestResult.error ? '无响应内容' : '该请求未返回 JSON 响应体') }}</pre>
-                                    <div v-if="stepTestResult.assertions_result && stepTestResult.assertions_result.length" style="padding: 0 14px 12px;">
-                                        <div style="font-size: 11.5px; font-weight: 600; color: #475569; margin-bottom: 6px;">断言明细:</div>
-                                        <div v-for="(a, ai) in stepTestResult.assertions_result" :key="ai"
-                                            style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 2px 0;">
-                                            <i :class="a.passed ? 'fa-solid fa-circle-check' : 'fa-solid fa-circle-xmark'"
-                                                :style="{ color: a.passed ? '#10b981' : '#ef4444' }"></i>
-                                            <span style="color: #334155;">{{ a.name || a.type }}</span>
-                                            <span v-if="!a.passed && a.message" style="color: #dc2626;">{{ a.message }}</span>
+
+                                    <!-- 视图 1: 完整响应体 -->
+                                    <div v-if="stepResponseTab === 'body'">
+                                        <!-- 已提取变量提示栏 -->
+                                        <div v-if="stepTestResult.extracted_variables && Object.keys(stepTestResult.extracted_variables).length > 0"
+                                            style="margin: 8px 14px 0; padding: 6px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                            <div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #15803d; font-weight: 600;">
+                                                <i class="fa-solid fa-circle-check"></i>
+                                                <span>本节点已提取变量:</span>
+                                                <span v-for="(val, k) in stepTestResult.extracted_variables" :key="k"
+                                                    style="background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 1px 6px; border-radius: 4px; font-family: monospace;">
+                                                    &#123;&#123;{{ k }}&#125;&#125;
+                                                </span>
+                                            </div>
+                                            <el-button size="small" link type="success" @click="stepResponseTab = 'extract'">
+                                                <i class="fa-solid fa-plus" style="margin-right: 2px;"></i>提取更多字段
+                                            </el-button>
                                         </div>
+
+                                        <pre class="pm-response-body">{{ getStepResponseFormattedBody }}</pre>
+
+                                        <div v-if="stepTestResult.assertions_result && stepTestResult.assertions_result.length" style="padding: 0 14px 12px;">
+                                            <div style="font-size: 11.5px; font-weight: 600; color: #475569; margin-bottom: 6px;">断言明细:</div>
+                                            <div v-for="(a, ai) in stepTestResult.assertions_result" :key="ai"
+                                                style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 2px 0;">
+                                                <i :class="a.passed ? 'fa-solid fa-circle-check' : 'fa-solid fa-circle-xmark'"
+                                                    :style="{ color: a.passed ? '#10b981' : '#ef4444' }"></i>
+                                                <span style="color: #334155;">{{ a.name || a.type }}</span>
+                                                <span v-if="!a.passed && a.message" style="color: #dc2626;">{{ a.message }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 视图 2: 从当前响应提取场景专属变量 -->
+                                    <div v-else-if="stepResponseTab === 'extract'" style="padding: 12px 14px;">
+                                        <!-- 说明横幅 -->
+                                        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: #1e40af; display: flex; align-items: flex-start; gap: 8px;">
+                                            <i class="fa-solid fa-circle-info" style="color: #2563eb; margin-top: 2px;"></i>
+                                            <div style="line-height: 1.5;">
+                                                <b>场景变量提取助手</b>：从下方当前节点的真实响应数据中，点选需要的字段并点击【设为场景变量】。
+                                                切换至<b>下一个接口</b>时，即可在 <b>Body、Params、Headers、URL</b> 中一键引用 <code>&#123;&#123;变量名&#125;&#125;</code>，数据完全隔离防污染。
+                                            </div>
+                                        </div>
+
+                                        <!-- 自定义路径提取行 (针对数组下标或复杂结构) -->
+                                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px;">
+                                            <div style="font-size: 11.5px; font-weight: 700; color: #475569; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                                <i class="fa-solid fa-code-fork" style="color: #3b82f6;"></i>
+                                                <span>自定义路径提取 (支持如 <code>data.token</code> 或 <code>data.items[0].id</code>)</span>
+                                            </div>
+                                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                                <el-input v-model="customExtractPath" placeholder="提取字段路径，如 data.token 或 list[0].id" size="small" style="width: 260px;"></el-input>
+                                                <el-input v-model="customExtractVarName" placeholder="保存为场景变量名，如 token" size="small" style="width: 180px;"></el-input>
+                                                <div v-if="customExtractPreview !== null" style="font-size: 11.5px; color: #0284c7; background: #e0f2fe; padding: 3px 8px; border-radius: 4px; font-family: monospace;">
+                                                    实时预览: <b>{{ String(customExtractPreview).length > 25 ? String(customExtractPreview).slice(0, 25) + '...' : customExtractPreview }}</b>
+                                                </div>
+                                                <el-button size="small" type="primary" @click="addCustomExtractToScenarioVariable" :disabled="!customExtractPath || !customExtractVarName">
+                                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加并设为场景变量
+                                                </el-button>
+                                            </div>
+                                        </div>
+
+                                        <!-- 响应叶子字段解析表 -->
+                                        <div style="margin-bottom: 6px; font-size: 12px; font-weight: 600; color: #334155; display: flex; align-items: center; justify-content: space-between;">
+                                            <span>
+                                                <i class="fa-solid fa-list-check" style="margin-right: 4px; color: #10b981;"></i>
+                                                响应字段列表 (点击【设为场景变量】即完成配置，后续节点一键引用)
+                                            </span>
+                                            <span style="font-size: 11px; color: #64748b;">共发现 {{ stepExtractableFields.length }} 个数据字段</span>
+                                        </div>
+
+                                        <div v-if="!stepExtractableFields.length" style="text-align: center; color: #94a3b8; padding: 24px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; font-size: 12px;">
+                                            当前响应不是标准 JSON 对象或未解析出字段，可使用上方【自定义路径提取】。
+                                        </div>
+
+                                        <el-table v-else :data="stepExtractableFields" size="small" border style="width: 100%; max-height: 240px; overflow-y: auto;">
+                                            <el-table-column label="字段路径 (JSONPath)" prop="path" min-width="160">
+                                                <template #default="{ row }">
+                                                    <code style="font-weight: 600; color: #0f172a; font-size: 11.5px;">{{ row.path }}</code>
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column label="当前返回值 (Sample Value)" min-width="170">
+                                                <template #default="{ row }">
+                                                    <span style="font-family: monospace; font-size: 11.5px; color: #0284c7; word-break: break-all;">
+                                                        {{ typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? 'null') }}
+                                                    </span>
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column label="存入场景变量名 (可修改)" min-width="170">
+                                                <template #default="{ row }">
+                                                    <el-input v-model="stepExtractedVarNames[row.path]" size="small"
+                                                        placeholder="如 token 或 userId" style="font-family: monospace;">
+                                                        <template #prepend><span style="font-size: 10px;">&#123;&#123;</span></template>
+                                                        <template #append><span style="font-size: 10px;">&#125;&#125;</span></template>
+                                                    </el-input>
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column label="操作" width="160" align="center">
+                                                <template #default="{ row }">
+                                                    <div v-if="isFieldExtractedInActiveStep(row.path, stepExtractedVarNames[row.path])" style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                                        <el-tag size="small" type="success" effect="plain" style="font-weight: 600;">
+                                                            <i class="fa-solid fa-check" style="margin-right: 2px;"></i>已设为变量
+                                                        </el-tag>
+                                                        <el-button size="small" link type="primary" @click="copyVariableMacro(stepExtractedVarNames[row.path])" title="复制宏到剪贴板">
+                                                            复制宏
+                                                        </el-button>
+                                                    </div>
+                                                    <el-button v-else size="small" type="primary" plain @click="quickExtractFieldToScenarioVariable(row)">
+                                                        <i class="fa-solid fa-plus" style="margin-right: 3px;"></i>设为场景变量
+                                                    </el-button>
+                                                </template>
+                                            </el-table-column>
+                                        </el-table>
                                     </div>
                                 </template>
                             </div>
@@ -1121,6 +1390,83 @@
                                         {{ editingScenarioId ? '保存修改' : '创建场景' }}
                                     </el-button>
                                 </div>
+                            </div>
+                        </template>
+                    </el-dialog>
+
+                    <!-- ================= 场景专属变量管理弹窗 (仅限本场景生效, 隔离防污染) ================= -->
+                    <el-dialog v-model="scenarioVariablesDrawerVisible" title="场景专属变量管理" width="760px"
+                        class="postman-dialog" append-to-body destroy-on-close>
+                        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+                            <div style="font-size: 13px; font-weight: 700; color: #1e40af; margin-bottom: 5px; display: flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-shield-halved" style="color: #2563eb;"></i>
+                                <span>场景变量作用域与隔离保护说明</span>
+                                <el-tag size="small" type="primary" effect="plain" style="margin-left: 4px; font-weight: 600;">仅本场景生效 · 隔离防污染</el-tag>
+                            </div>
+                            <div style="font-size: 12px; color: #1d4ed8; line-height: 1.6;">
+                                <div><b>1. 场景内链路传递</b>: 此处定义的变量仅在当前场景执行过程中生效。步骤 1 后置提取（<code>extract_variable</code>）的数据会自动写入本变量池，步骤 2 及后续步骤可在请求路径、参数、请求头或 Body 中通过 <code>&#123;&#123;变量名&#125;&#125;</code> 宏直接引用。</div>
+                                <div style="margin-top: 3px;"><b>2. 绝对隔离防污染</b>: 场景整链执行与单步调试过程中的变量更新严格局限于本场景运行时，<b>绝不回写、修改或污染全局环境变量，也绝不影响其他接口与其他拨测场景</b>。</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="font-size: 12.5px; font-weight: 600; color: #334155; display: flex; align-items: center; gap: 6px;">
+                                <i class="fa-solid fa-cube" style="color: #3b82f6;"></i>
+                                <span>当前场景变量列表</span>
+                                <el-tag size="small" type="info" effect="plain">{{ scenarioVariablesCount }} 个已配置</el-tag>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <el-button size="small" type="primary" plain @click="addScenarioVariableRow">
+                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加变量
+                                </el-button>
+                                <el-button size="small" type="danger" plain @click="clearScenarioVariables" :disabled="!scenarioVariablesList.length">
+                                    <i class="fa-solid fa-trash" style="margin-right: 4px;"></i>清空全部
+                                </el-button>
+                            </div>
+                        </div>
+
+                        <el-table :data="scenarioVariablesList" size="small" border style="width: 100%;" empty-text="暂无场景专属变量，可点击右上角【添加变量】，或在节点调试中通过后置提取自动注入">
+                            <el-table-column label="启用" width="55" align="center">
+                                <template #default="{ row }">
+                                    <el-checkbox v-model="row.enabled"></el-checkbox>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="变量名 (Key)" min-width="170">
+                                <template #default="{ row }">
+                                    <el-input v-model="row.key" placeholder="如: userId, token" size="small"></el-input>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="默认初始值 (Value)" min-width="200">
+                                <template #default="{ row }">
+                                    <el-input v-model="row.value" placeholder="初始默认值 (可选)" size="small"></el-input>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="说明 (Description)" min-width="150">
+                                <template #default="{ row }">
+                                    <el-input v-model="row.description" placeholder="用途说明 (可选)" size="small"></el-input>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="90" align="center">
+                                <template #default="{ row, $index }">
+                                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                        <el-button link type="primary" size="small" @click="copyVariableMacro(row.key)" :disabled="!row.key" title="复制宏 {{变量名}}">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </el-button>
+                                        <el-button link type="danger" size="small" @click="removeScenarioVariableRow($index)" title="删除该变量">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </el-button>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <template #footer>
+                            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                <div style="font-size: 11.5px; color: #64748b;">
+                                    <i class="fa-solid fa-lightbulb" style="color: #f59e0b; margin-right: 3px;"></i>
+                                    在后续节点中直接写入 <code style="background: #f1f5f9; color: #2563eb; padding: 1px 4px; border-radius: 3px;">&#123;&#123;变量名&#125;&#125;</code> 即可插值替换
+                                </div>
+                                <el-button type="primary" @click="scenarioVariablesDrawerVisible = false">完成</el-button>
                             </div>
                         </template>
                     </el-dialog>
@@ -1225,6 +1571,23 @@
                             <div v-if="scenarioResult.error_message"
                                 style="margin-bottom: 12px; padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 12px; color: #dc2626;">
                                 <i class="fa-solid fa-circle-exclamation" style="margin-right: 4px;"></i>{{ scenarioResult.error_message }}
+                            </div>
+
+                            <!-- 场景运行时变量池快照 (隔离生效) -->
+                            <div v-if="scenarioResult.scenario_variables && Object.keys(scenarioResult.scenario_variables).length"
+                                style="margin-bottom: 14px; padding: 10px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                    <div style="font-size: 12px; font-weight: 700; color: #1e40af; display: flex; align-items: center; gap: 5px;">
+                                        <i class="fa-solid fa-cube" style="color: #2563eb;"></i>
+                                        <span>场景运行时变量池快照</span>
+                                    </div>
+                                    <el-tag size="small" type="primary" effect="plain" style="font-size: 10px; font-weight: 600;">隔离保护生效中</el-tag>
+                                </div>
+                                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                    <el-tag v-for="(v, k) in scenarioResult.scenario_variables" :key="k" size="small" type="primary" effect="light">
+                                        <span style="font-weight: 700;">{{ k }}</span> = {{ v }}
+                                    </el-tag>
+                                </div>
                             </div>
 
                             <!-- 节点执行时间线 -->
@@ -1396,6 +1759,16 @@
                                         <div style="padding: 12px 18px; background: #fffaf5; border-radius: 6px; border: 1px solid #fed7aa;">
                                             <div v-if="hRow.error_message" style="margin-bottom: 10px; padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; color: #dc2626; font-size: 12px;">
                                                 <i class="fa-solid fa-circle-exclamation" style="margin-right: 4px;"></i>整链异常: {{ hRow.error_message }}
+                                            </div>
+                                            <!-- 场景运行时变量池快照 -->
+                                            <div v-if="hRow.scenario_variables && Object.keys(hRow.scenario_variables).length"
+                                                style="margin-bottom: 10px; padding: 8px 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 11.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                                                <span style="font-weight: 600; color: #1e40af; display: flex; align-items: center; gap: 4px;">
+                                                    <i class="fa-solid fa-cube"></i>场景变量快照:
+                                                </span>
+                                                <el-tag v-for="(v, k) in hRow.scenario_variables" :key="k" size="small" type="primary" effect="plain">
+                                                    <b>{{ k }}</b> = {{ v }}
+                                                </el-tag>
                                             </div>
                                             <div style="font-weight: 600; font-size: 12.5px; color: #334155; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
                                                 <i class="fa-solid fa-list-check" style="color: #f97316;"></i>步骤执行快照 (共 {{ (hRow.steps_detail || []).length }} 步):
@@ -1642,7 +2015,29 @@ export default {
             isScenarioStepsExpanded: wb.isScenarioStepsExpanded,
             toggleScenarioStepsExpand: wb.toggleScenarioStepsExpand,
             isAllScenarioStepsExpanded: wb.isAllScenarioStepsExpanded,
-            toggleAllScenarioStepsExpand: wb.toggleAllScenarioStepsExpand
+            toggleAllScenarioStepsExpand: wb.toggleAllScenarioStepsExpand,
+            // 场景专属变量池 (隔离防污染)
+            scenarioVariablesList: wb.scenarioVariablesList,
+            scenarioVariablesDrawerVisible: wb.scenarioVariablesDrawerVisible,
+            scenarioVariablesCount: wb.scenarioVariablesCount,
+            addScenarioVariableRow: wb.addScenarioVariableRow,
+            removeScenarioVariableRow: wb.removeScenarioVariableRow,
+            clearScenarioVariables: wb.clearScenarioVariables,
+            copyVariableMacro: wb.copyVariableMacro,
+            stepResponseTab: wb.stepResponseTab,
+            stepExtractedVarNames: wb.stepExtractedVarNames,
+            customExtractPath: wb.customExtractPath,
+            customExtractVarName: wb.customExtractVarName,
+            customExtractPreview: wb.customExtractPreview,
+            stepExtractableFields: wb.stepExtractableFields,
+            getStepResponseFormattedBody: wb.getStepResponseFormattedBody,
+            isFieldExtractedInActiveStep: wb.isFieldExtractedInActiveStep,
+            quickExtractFieldToScenarioVariable: wb.quickExtractFieldToScenarioVariable,
+            addCustomExtractToScenarioVariable: wb.addCustomExtractToScenarioVariable,
+            insertScenarioVarToStepBody: wb.insertScenarioVarToStepBody,
+            insertScenarioVarToStepParam: wb.insertScenarioVarToStepParam,
+            insertScenarioVarToStepHeader: wb.insertScenarioVarToStepHeader,
+            insertScenarioVarToStepPath: wb.insertScenarioVarToStepPath
         }
     }
 }

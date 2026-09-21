@@ -154,6 +154,7 @@ class ScenarioProbe(SQLModel, table=True):
     description: Optional[str] = Field(default=None, max_length=255)
     base_url: Optional[str] = Field(default=None, max_length=255) # 场景基准地址 (优先于宿主机器地址)
     steps: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 业务链路步骤链
+    variables: Dict[str, Any] = Field(default={}, sa_column=Column(JSON)) # 场景专属初始变量池 (仅限本场景生效, 隔离防污染)
     cron_interval_minutes: int = Field(default=5)
     is_active: bool = Field(default=True)
 
@@ -176,6 +177,7 @@ class ScenarioProbeHistory(SQLModel, table=True):
     is_success: bool = Field(default=False)               # 所有业务节点全部通过才算成功 (清理步骤不参与判定)
     total_latency_ms: Optional[float] = None              # 整链总耗时
     steps_detail: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))  # 逐节点执行明细
+    scenario_variables: Dict[str, Any] = Field(default={}, sa_column=Column(JSON)) # 运行时场景变量池快照 (含初始变量与提取变量)
     error_message: Optional[str] = Field(default=None, max_length=500)
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 

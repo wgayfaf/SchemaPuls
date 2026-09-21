@@ -49,6 +49,7 @@ def _serialize(s: ScenarioProbe, session: Session, latest_history: Optional[Scen
         "description": s.description,
         "base_url": s.base_url,
         "steps": s.steps or [],
+        "variables": s.variables or {},
         "step_count": len(s.steps or []),
         "cleanup_step_count": len([x for x in (s.steps or []) if x.get("is_cleanup")]),
         "cron_interval_minutes": s.cron_interval_minutes,
@@ -102,6 +103,7 @@ def create_scenario(data: ScenarioPayload, session: Session = Depends(get_sessio
         description=data.description,
         base_url=data.base_url,
         steps=data.steps,
+        variables=data.variables or {},
         cron_interval_minutes=data.cron_interval_minutes,
         is_active=data.is_active
     )
@@ -126,6 +128,7 @@ def update_scenario(id: int, data: ScenarioPayload, session: Session = Depends(g
     scenario.description = data.description
     scenario.base_url = data.base_url
     scenario.steps = data.steps
+    scenario.variables = data.variables or {}
     scenario.cron_interval_minutes = data.cron_interval_minutes
     scenario.is_active = data.is_active
     session.add(scenario)
@@ -246,7 +249,7 @@ def get_scenario_metrics(id: int, session: Session = Depends(get_session)):
 
 @router.post("/test-step")
 async def test_scenario_step(data: ScenarioStepTestPayload, session: Session = Depends(get_session)):
-    """单节点无状态调试: 在场景编排对话框中即时发包验证单个节点配置 (不落库不回写状态)"""
+    """单节点无状态调试: 在场景编排对话框中即时发包验证单个节点配置 (不落库不回写状态, 隔离防污染)"""
     machine = session.get(MachineNode, data.machine_id)
     if not machine:
         raise HTTPException(status_code=404, detail="Associated MachineNode not found")
@@ -258,30 +261,25 @@ async def test_scenario_step(data: ScenarioStepTestPayload, session: Session = D
     from app.services.scenario_service import _resolve_base_url
     base_url = _resolve_base_url(data.base_url, machine)
 
-    variable_pool: Dict[str, Any] = dict(env_variables)
-    result, updated_env, json_data = await execute_scenario_step(
+    scenario_vars: Dict[str, Any] = dict(data.scenario_variables or {})
+    # 环境全局变量作为只读底座, 场景专属变量优先覆盖 (隔离防污染)
+    variable_pool: Dict[str, Any] = {**env_variables, **scenario_vars}
+
+    result, updated_vars, json_data = await execute_scenario_step(
         data.step or {}, base_url, variable_pool, step_index=0
     )
     # 单步调试透出完整 JSON 响应 (供前端一键推导 Schema; 历史流水仅存截断 snippet)
     result["response_data"] = json_data
+    scenario_vars.update(updated_vars)
 
-    # 调试产生的环境变量更新同样同步持久化 (与接口管理 test-run 行为一致)
-    if updated_env and env:
-        from sqlalchemy.orm.attributes import flag_modified
-        current_vars = dict(env.variables or {})
-        current_vars.update(updated_env)
-        env.variables = current_vars
-        flag_modified(env, "variables")
-        session.add(env)
-        session.commit()
-        variable_pool.update(updated_env)
-
+    # 关键：场景单步调试变量局限在场景内，绝不反向回写或污染环境实体！
     return {
         **result,
+        "scenario_variables": scenario_vars,
+        "extracted_scenario_variables": updated_vars,
         "environment": {
             "id": env.id if env else None,
             "name": env.name if env else "默认环境",
-            "variables": variable_pool,
-            "updated_variables": updated_env
+            "variables": env_variables
         }
     }

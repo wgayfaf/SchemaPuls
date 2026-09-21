@@ -201,13 +201,14 @@ async def execute_scenario_step(
     # 6. 健康判定: HTTP 成功 + Schema 契约未突变 + 全部断言通过
     result["ok"] = bool(http_ok and (http_code == 200) and (result["schema_matched"] is not False) and all_assertions_passed)
 
-    # 7. 提取变量注入场景共享变量池 (供后续节点 {{引用}}), 并收集需持久化的环境变量
-    variable_pool.update({k: v for k, v in extracted_vars.items() if k})
-    updated_env: Dict[str, Any] = {}
-    updated_env.update(pre_updated_env)
-    updated_env.update(post_updated_env)
+    # 7. 提取变量与前置变量注入场景共享变量池 (供后续节点 {{引用}})
+    step_extracted_vars = {k: v for k, v in extracted_vars.items() if k}
+    new_step_vars: Dict[str, Any] = {}
+    new_step_vars.update(pre_updated_env)
+    new_step_vars.update(step_extracted_vars)
+    variable_pool.update(new_step_vars)
 
-    return result, updated_env, json_data
+    return result, new_step_vars, json_data
 
 
 # ==========================================================
@@ -243,10 +244,13 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
         base_url = _resolve_base_url(scenario.base_url, machine)
         scenario_name = scenario.name
         steps: List[Dict[str, Any]] = list(scenario.steps or [])
+        initial_scenario_vars = dict(scenario.variables or {})
 
     now = datetime.utcnow()
-    variable_pool: Dict[str, Any] = dict(env_variables)
-    all_updated_env: Dict[str, Any] = {}
+    # 场景专属变量池: 继承场景预设变量, 并在链路执行过程中接收各节点的提取变量 (隔离防污染)
+    scenario_vars: Dict[str, Any] = dict(initial_scenario_vars)
+    # 请求变量池: 环境全局变量作为只读底座, 场景专属变量优先覆盖 (严格隔离, 绝不反向污染外部环境)
+    variable_pool: Dict[str, Any] = {**env_variables, **scenario_vars}
 
     # 2. 【熔断短路守卫】宿主机器离线时跳过整链网络请求
     if machine_status == "OFFLINE":
@@ -295,8 +299,9 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
             })
             continue
         try:
-            step_result, updated_env, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
-            all_updated_env.update(updated_env)
+            step_result, updated_vars, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
+            scenario_vars.update(updated_vars)
+            variable_pool.update(updated_vars)
             steps_detail.append(step_result)
             if not step_result.get("ok"):
                 chain_aborted = True
@@ -317,8 +322,9 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
     # 5. 清理节点: 无论业务链路成败均执行 (finally 语义)
     for idx, step in cleanup_steps:
         try:
-            step_result, updated_env, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
-            all_updated_env.update(updated_env)
+            step_result, updated_vars, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
+            scenario_vars.update(updated_vars)
+            variable_pool.update(updated_vars)
             steps_detail.append(step_result)
         except Exception as step_err:
             steps_detail.append({
@@ -349,21 +355,8 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
     else:
         last_schema_matched = None
 
-    # 8. 持久化执行结果与场景状态; 同步环境变量更新
+    # 8. 持久化执行结果与场景状态 (场景变量严格隔离, 绝不反向污染外部环境实体)
     with Session(engine) as session:
-        if all_updated_env and env_id:
-            try:
-                from sqlalchemy.orm.attributes import flag_modified
-                env_record = session.get(Environment, env_id)
-                if env_record:
-                    curr_vars = dict(env_record.variables or {})
-                    curr_vars.update(all_updated_env)
-                    env_record.variables = curr_vars
-                    flag_modified(env_record, "variables")
-                    session.add(env_record)
-            except Exception as env_err:
-                print(f"[Warn] 场景拨测持久化更新环境变量失败: {env_err}")
-
         scenario = session.get(ScenarioProbe, scenario_id)
         if scenario:
             scenario.current_status = "HEALTHY" if is_success else "DOWN"
@@ -379,6 +372,7 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
             is_success=is_success,
             total_latency_ms=total_latency_ms,
             steps_detail=steps_detail,
+            scenario_variables=scenario_vars,  # 保存场景执行结束时的运行时变量池快照
             error_message=error_message,
             probed_at=now
         )
@@ -408,6 +402,7 @@ def serialize_scenario_history(h: ScenarioProbeHistory) -> dict:
         "schema_matched": schema_matched,
         "schema_configured": bool(cfg_steps),
         "steps_detail": h.steps_detail or [],
+        "scenario_variables": h.scenario_variables or {},
         "error_message": h.error_message,
         "probed_at": h.probed_at.isoformat() if h.probed_at else None,
     }
