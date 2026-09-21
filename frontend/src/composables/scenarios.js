@@ -12,6 +12,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import axios from 'axios'
+import * as echarts from 'echarts'
 import { machineList, environmentList, apiList } from './core'
 import { fetchMachineEnvironment, currentMachineEnvironment } from './machines'
 import { safeFormatJson } from './apis'
@@ -21,6 +22,8 @@ const scenarioList = ref([])
 const scenarioLoading = ref(false)
 const scenarioSearchQuery = ref('')
 const selectedScenarioEnv = ref('ALL')
+const selectedScenarioMachine = ref('ALL')
+const selectedScenarioStatus = ref('ALL')
 
 // ================= 对话框与表单状态 =================
 const scenarioDialogVisible = ref(false)
@@ -67,6 +70,18 @@ const fetchScenarios = async () => {
     }
 }
 
+const toggleScenarioActive = async (row) => {
+    try {
+        const res = await axios.post(`/api/scenarios/${row.id}/toggle-active`)
+        if (res.data) {
+            row.is_active = res.data.is_active
+            ElMessage.success(`场景 [${row.name}] 自动定时调度已${row.is_active ? '开启' : '关闭'}`)
+        }
+    } catch (err) {
+        ElMessage.error('切换场景定时调度状态失败: ' + (err.response?.data?.detail || err.message))
+    }
+}
+
 // ================= 计算属性 =================
 // 按环境筛选后的场景集合
 const currentEnvScenarios = computed(() => {
@@ -80,6 +95,12 @@ const currentEnvScenarios = computed(() => {
 
 const filteredScenarios = computed(() => {
     let list = currentEnvScenarios.value
+    if (selectedScenarioMachine.value !== 'ALL') {
+        list = list.filter(s => s.machine_id === selectedScenarioMachine.value)
+    }
+    if (selectedScenarioStatus.value !== 'ALL') {
+        list = list.filter(s => s.current_status === selectedScenarioStatus.value)
+    }
     if (scenarioSearchQuery.value && scenarioSearchQuery.value.trim()) {
         const q = scenarioSearchQuery.value.toLowerCase().trim()
         list = list.filter(s =>
@@ -90,6 +111,41 @@ const filteredScenarios = computed(() => {
     }
     return list
 })
+
+// ================= 业务链路步骤折叠与展开状态 (解决多接口平铺变形) =================
+const expandedScenarioStepIds = ref(new Set())
+
+const isScenarioStepsExpanded = (id) => expandedScenarioStepIds.value.has(id)
+
+const toggleScenarioStepsExpand = (id) => {
+    const next = new Set(expandedScenarioStepIds.value)
+    if (next.has(id)) {
+        next.delete(id)
+    } else {
+        next.add(id)
+    }
+    expandedScenarioStepIds.value = next
+}
+
+const isAllScenarioStepsExpanded = computed(() => {
+    const scenariosWithMoreSteps = filteredScenarios.value.filter(s => (s.steps || []).length > 2)
+    if (!scenariosWithMoreSteps.length) return false
+    return scenariosWithMoreSteps.every(s => expandedScenarioStepIds.value.has(s.id))
+})
+
+const toggleAllScenarioStepsExpand = () => {
+    if (isAllScenarioStepsExpanded.value) {
+        expandedScenarioStepIds.value = new Set()
+    } else {
+        const next = new Set()
+        filteredScenarios.value.forEach(s => {
+            if ((s.steps || []).length > 2) {
+                next.add(s.id)
+            }
+        })
+        expandedScenarioStepIds.value = next
+    }
+}
 
 // 当前环境可选的机器节点 (对话框宿主机器下拉)
 const scenarioMachineOptions = computed(() => {
@@ -566,7 +622,10 @@ const handleRunScenario = async (row) => {
         const h = res.data.history
         scenarioResult.value = h
         scenarioResultVisible.value = true
-        fetchScenarios()
+        if (res.data.scenario) {
+            Object.assign(row, res.data.scenario)
+        }
+        await fetchScenarios()
         if (h.is_success) {
             ElMessage.success(`场景 [${row.name}] 拨测通过！共 ${h.steps_detail.length} 个节点, 总耗时 ${h.total_latency_ms}ms`)
         } else {
@@ -608,6 +667,9 @@ const handleTestRunStep = async () => {
             step: buildStepPayload(activeStep.value)
         })
         stepTestResult.value = res.data
+        if (activeStep.value) {
+            activeStep.value._testResult = res.data
+        }
         const ok = res.data.ok
         if (ok) {
             ElMessage.success(`节点调试通过: HTTP ${res.data.status_code}, 耗时 ${res.data.latency_ms}ms`)
@@ -885,8 +947,147 @@ const getScenarioStatusText = (status) => {
     }
 }
 
+// ================= 场景时序排障报表与运行历史抽屉 =================
+const scenarioMetricsDrawerVisible = ref(false)
+const scenarioMetricsLoading = ref(false)
+const activeScenarioMetrics = ref(null)
+const scenarioHistoryList = ref([])
+let scenarioEchartsInstance = null
+
+const renderScenarioChart = (points) => {
+    const dom = document.getElementById('scenarioChartContainer')
+    if (!dom) return
+
+    if (scenarioEchartsInstance) {
+        scenarioEchartsInstance.dispose()
+    }
+    scenarioEchartsInstance = echarts.init(dom)
+
+    const times = points.map(p => p.time)
+    const latencyData = points.map(p => (p.total_latency_ms !== undefined && p.total_latency_ms !== null ? p.total_latency_ms : null))
+
+    const markPoints = points
+        .filter(p => !p.is_success || p.schema_matched === false)
+        .map(p => ({
+            name: p.schema_matched === false ? "契约突变" : "链路失败",
+            coord: [p.time, p.total_latency_ms || 10],
+            value: p.schema_matched === false ? "MUTATE" : "FAIL",
+            itemStyle: { color: "#dc2626" }
+        }))
+
+    const option = {
+        backgroundColor: "transparent",
+        tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "cross", crossStyle: { color: "#94a3b8" } },
+            backgroundColor: "rgba(255, 255, 255, 0.96)",
+            borderColor: "#fed7aa",
+            borderWidth: 1,
+            textStyle: { color: "#0f172a" },
+            extraCssText: "box-shadow: 0 4px 14px rgba(249, 115, 22, 0.12); border-radius: 8px;",
+            formatter: (params) => {
+                if (!params || !params.length) return ""
+                const idx = params[0].dataIndex
+                const pt = points[idx]
+                if (!pt) return ""
+                let html = `<div style="font-weight: 700; font-size: 12.5px; margin-bottom: 4px; color: #0f172a;">${pt.timestamp ? pt.timestamp.replace('T', ' ').slice(0, 19) : pt.time}</div>`
+                html += `<div style="font-size: 11.5px; color: #475569; margin-bottom: 2px;">触发方式: <b style="color: ${pt.trigger === 'manual' ? '#2563eb' : '#64748b'}">${pt.trigger === 'manual' ? '手动触发' : '定时调度'}</b></div>`
+                html += `<div style="font-size: 11.5px; color: #475569; margin-bottom: 2px;">整链耗时: <b style="color: #ea580c;">${pt.total_latency_ms || 0} ms</b></div>`
+                html += `<div style="font-size: 11.5px; margin-bottom: 2px;">执行状态: <b style="color: ${pt.is_success ? '#059669' : '#dc2626'}">${pt.is_success ? '整链通过' : '存在失败节点'}</b></div>`
+                if (pt.schema_configured) {
+                    html += `<div style="font-size: 11.5px; color: #475569; margin-bottom: 2px;">契约校验: <b style="color: ${pt.schema_matched === true ? '#059669' : '#dc2626'}">${pt.schema_matched === true ? '契约一致' : '契约突变'}</b></div>`
+                } else {
+                    html += `<div style="font-size: 11.5px; color: #94a3b8;">契约校验: 未配置</div>`
+                }
+                if (pt.error_message) {
+                    html += `<div style="font-size: 11px; color: #dc2626; margin-top: 4px; max-width: 260px; word-break: break-all;">${pt.error_message}</div>`
+                }
+                return html
+            }
+        },
+        legend: {
+            data: ["整链耗时 (ms)"],
+            textStyle: { color: "#475569" },
+            top: 4
+        },
+        grid: {
+            left: "3%",
+            right: "4%",
+            bottom: "3%",
+            containLabel: true
+        },
+        xAxis: {
+            type: "category",
+            data: times.length ? times : ["暂无时序数据"],
+            axisLine: { lineStyle: { color: "#cbd5e1" } },
+            axisLabel: { color: "#64748b", fontSize: 11 }
+        },
+        yAxis: {
+            type: "value",
+            name: "总耗时 (ms)",
+            nameTextStyle: { color: "#64748b" },
+            axisLine: { lineStyle: { color: "#cbd5e1" } },
+            splitLine: { lineStyle: { color: "#f3f4f6", type: "dashed" } },
+            axisLabel: { color: "#64748b", fontSize: 11 }
+        },
+        series: [
+            {
+                name: "整链耗时 (ms)",
+                type: "line",
+                smooth: true,
+                data: latencyData,
+                itemStyle: { color: "#f97316" },
+                lineStyle: { width: 2.2 },
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: "rgba(249, 115, 22, 0.22)" },
+                        { offset: 1, color: "rgba(249, 115, 22, 0.01)" }
+                    ])
+                },
+                markPoint: { data: markPoints }
+            }
+        ]
+    }
+    scenarioEchartsInstance.setOption(option)
+}
+
+const openScenarioMetricsDrawer = async (row) => {
+    activeScenarioMetrics.value = { ...row }
+    scenarioMetricsDrawerVisible.value = true
+    scenarioMetricsLoading.value = true
+    scenarioHistoryList.value = []
+    try {
+        const [historyRes, metricsRes] = await Promise.all([
+            axios.get(`/api/scenarios/${row.id}/history?limit=50`),
+            axios.get(`/api/scenarios/${row.id}/metrics`)
+        ])
+        scenarioHistoryList.value = Array.isArray(historyRes.data) ? historyRes.data : []
+        scenarioMetricsLoading.value = false
+        await nextTick()
+        setTimeout(() => {
+            renderScenarioChart(metricsRes.data?.points || [])
+        }, 150)
+    } catch (err) {
+        console.error("加载场景时序与历史异常:", err)
+        ElMessage.error("加载场景专属时序历史失败: " + (err.response?.data?.detail || err.message))
+        scenarioHistoryList.value = []
+        scenarioMetricsLoading.value = false
+        await nextTick()
+        setTimeout(() => {
+            renderScenarioChart([])
+        }, 150)
+    }
+}
+
+window.addEventListener('resize', () => {
+    if (scenarioEchartsInstance) {
+        scenarioEchartsInstance.resize()
+    }
+})
+
 export {
     scenarioList, scenarioLoading, scenarioSearchQuery, selectedScenarioEnv,
+    selectedScenarioMachine, selectedScenarioStatus, toggleScenarioActive,
     scenarioDialogVisible, editingScenarioId, scenarioSubmitting, scenarioForm,
     scenarioIntervalValue, scenarioIntervalUnit, setQuickScenarioInterval,
     scenarioSteps, activeStepIndex, activeStep, stepActiveTab,
@@ -907,5 +1108,8 @@ export {
     handleRunScenario, getStepResultBadge, handleTestRunStep,
     apiImportDialogVisible, apiImportSearch, apiImportMethodFilter, apiImportSelection, apiImportTableRef,
     importableApis, openApiImportDialog, handleApiImportSelectionChange, confirmImportApisAsSteps, fillActiveStepFromApi,
-    getMethodBadgeStyle, getScenarioStatusBadgeClass, getScenarioStatusText
+    getMethodBadgeStyle, getScenarioStatusBadgeClass, getScenarioStatusText,
+    scenarioMetricsDrawerVisible, scenarioMetricsLoading, activeScenarioMetrics, scenarioHistoryList,
+    openScenarioMetricsDrawer, renderScenarioChart,
+    expandedScenarioStepIds, isScenarioStepsExpanded, toggleScenarioStepsExpand, isAllScenarioStepsExpanded, toggleAllScenarioStepsExpand
 }

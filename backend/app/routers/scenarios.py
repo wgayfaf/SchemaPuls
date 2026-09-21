@@ -21,10 +21,27 @@ from app.services.scenario_service import (
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 
 
-def _serialize(s: ScenarioProbe, session: Session) -> dict:
+def _serialize(s: ScenarioProbe, session: Session, latest_history: Optional[ScenarioProbeHistory] = None) -> dict:
     m = session.get(MachineNode, s.machine_id)
     grp = session.get(ServiceGroup, m.group_id) if m and m.group_id else None
     env = session.get(Environment, grp.environment_id) if grp else None
+
+    # 是否配置了契约 (链路中是否至少有一个节点配置了 expected_schema)
+    schema_configured = any(bool(step.get("expected_schema")) for step in (s.steps or []))
+
+    last_schema_matched = s.last_schema_matched
+    last_steps_detail = []
+    if latest_history:
+        last_steps_detail = latest_history.steps_detail or []
+        # 若老数据尚未落库 last_schema_matched，从最新历史 steps_detail 中推导兼容
+        if last_schema_matched is None and last_steps_detail:
+            cfg = [d for d in last_steps_detail if d.get("schema_configured")]
+            if cfg:
+                if any(d.get("schema_matched") is False for d in cfg):
+                    last_schema_matched = False
+                elif all(d.get("schema_matched") is True for d in cfg):
+                    last_schema_matched = True
+
     return {
         "id": s.id,
         "machine_id": s.machine_id,
@@ -39,6 +56,9 @@ def _serialize(s: ScenarioProbe, session: Session) -> dict:
         "current_status": s.current_status,
         "last_run_at": s.last_run_at.isoformat() if s.last_run_at else None,
         "last_total_latency_ms": s.last_total_latency_ms,
+        "last_schema_matched": last_schema_matched,
+        "schema_configured": schema_configured,
+        "last_steps_detail": last_steps_detail,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "machine_name": m.name if m else "-",
         "machine_host": m.host if m else None,
@@ -52,7 +72,20 @@ def _serialize(s: ScenarioProbe, session: Session) -> dict:
 @router.get("")
 def list_scenarios(session: Session = Depends(get_session)):
     items = session.exec(select(ScenarioProbe).order_by(ScenarioProbe.id.desc())).all()
-    return [_serialize(s, session) for s in items]
+    scenario_ids = [s.id for s in items if s.id]
+    histories_by_scenario = {}
+    if scenario_ids:
+        # 查询最近的历史记录
+        histories = session.exec(
+            select(ScenarioProbeHistory)
+            .where(ScenarioProbeHistory.scenario_id.in_(scenario_ids))
+            .order_by(ScenarioProbeHistory.id.desc())
+        ).all()
+        for h in histories:
+            if h.scenario_id not in histories_by_scenario:
+                histories_by_scenario[h.scenario_id] = h
+
+    return [_serialize(s, session, latest_history=histories_by_scenario.get(s.id)) for s in items]
 
 
 @router.post("")
@@ -114,6 +147,20 @@ def delete_scenario(id: int, session: Session = Depends(get_session)):
     return {"detail": f"场景 [{scenario.name}] 已删除"}
 
 
+@router.post("/{id}/toggle-active")
+def toggle_scenario_active(id: int, session: Session = Depends(get_session)):
+    """快捷切换场景拨测的自动定时调度开关"""
+    scenario = session.get(ScenarioProbe, id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail="场景拨测不存在")
+    scenario.is_active = not scenario.is_active
+    session.add(scenario)
+    session.commit()
+    session.refresh(scenario)
+    add_scenario_job(scenario)
+    return _serialize(scenario, session)
+
+
 # ==========================================================
 # 拨测执行引擎接口
 # ==========================================================
@@ -128,7 +175,7 @@ async def run_scenario(id: int, session: Session = Depends(get_session)):
     scenario = session.get(ScenarioProbe, id)
     return {
         "history": serialize_scenario_history(history),
-        "scenario": _serialize(scenario, session) if scenario else None
+        "scenario": _serialize(scenario, session, latest_history=history) if scenario else None
     }
 
 
@@ -149,6 +196,52 @@ def list_scenario_history(
         .limit(max(1, min(limit, 200)))
     ).all()
     return [serialize_scenario_history(h) for h in items]
+
+
+@router.get("/{id}/metrics")
+def get_scenario_metrics(id: int, session: Session = Depends(get_session)):
+    """获取指定场景拨测的历史时序点位 (供 ECharts 绘图)"""
+    scenario = session.get(ScenarioProbe, id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"场景 [ID={id}] 不存在")
+
+    records = session.exec(
+        select(ScenarioProbeHistory)
+        .where(ScenarioProbeHistory.scenario_id == id)
+        .order_by(ScenarioProbeHistory.probed_at.desc())
+        .limit(100)
+    ).all()
+
+    points = []
+    for r in reversed(records):
+        cfg_steps = [d for d in (r.steps_detail or []) if d.get("schema_configured")]
+        schema_matched = None
+        if cfg_steps:
+            if any(d.get("schema_matched") is False for d in cfg_steps):
+                schema_matched = False
+            elif all(d.get("schema_matched") is True for d in cfg_steps):
+                schema_matched = True
+
+        points.append({
+            "id": r.id,
+            "time": r.probed_at.strftime("%H:%M:%S") if r.probed_at else "--:--:--",
+            "timestamp": r.probed_at.isoformat() if r.probed_at else None,
+            "total_latency_ms": r.total_latency_ms if r.total_latency_ms is not None else 0.0,
+            "is_success": r.is_success,
+            "trigger": r.trigger,
+            "schema_matched": schema_matched,
+            "schema_configured": bool(cfg_steps),
+            "step_count": len(r.steps_detail or []),
+            "passed_step_count": len([d for d in (r.steps_detail or []) if d.get("ok")]),
+            "failed_step_count": len([d for d in (r.steps_detail or []) if not d.get("ok") and not d.get("skipped")]),
+            "error_message": r.error_message
+        })
+
+    return {
+        "scenario_id": id,
+        "scenario_name": scenario.name,
+        "points": points
+    }
 
 
 @router.post("/test-step")

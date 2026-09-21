@@ -30,90 +30,286 @@
                         </div>
                     </div>
 
-                    <!-- 场景列表面板 -->
-                    <div class="panel" style="padding: 16px;">
-                        <!-- 工具条: 环境筛选 + 搜索 -->
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <span style="font-size: 13px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
-                                    <i class="fa-solid fa-route" style="color: #f97316;"></i>业务链路场景库
-                                </span>
-                                <el-select v-model="selectedScenarioEnv" size="small" style="width: 160px;">
-                                    <el-option label="全部环境" value="ALL"></el-option>
-                                    <el-option v-for="env in environmentList" :key="env.id" :label="env.name" :value="env.name"></el-option>
+                    <!-- 场景资产管理表格卡片 (与接口管理列表样式完全一致) -->
+                    <div class="wb-card">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div
+                                    style="font-size: 15px; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-route" style="color: #f97316;"></i>
+                                    <span>业务链路场景列表</span>
+                                </div>
+                                <el-radio-group v-model="selectedScenarioEnv" size="small">
+                                    <el-radio-button label="ALL">全部环境</el-radio-button>
+                                    <el-radio-button v-for="env in environmentList" :key="env.id" :label="env.name">{{
+                                        env.name }}</el-radio-button>
+                                </el-radio-group>
+                                <el-select v-model="selectedScenarioMachine" placeholder="所属机器" size="small"
+                                    style="width: 170px;">
+                                    <el-option label="全部机器节点" value="ALL"></el-option>
+                                    <el-option v-for="m in scenarioMachineOptions" :key="m.id"
+                                        :label="m.name + ' (' + m.host + ':' + m.port + ')'" :value="m.id"></el-option>
                                 </el-select>
+                                <el-select v-model="selectedScenarioStatus" placeholder="状态过滤" size="small"
+                                    style="width: 130px;">
+                                    <el-option label="全部状态" value="ALL"></el-option>
+                                    <el-option label="HEALTHY" value="HEALTHY"></el-option>
+                                    <el-option label="DOWN" value="DOWN"></el-option>
+                                    <el-option label="UNKNOWN" value="UNKNOWN"></el-option>
+                                </el-select>
+                                <el-tag size="small" type="info" effect="plain">{{ filteredScenarios.length }} 个场景</el-tag>
+                                <el-input v-model="scenarioSearchQuery" placeholder="搜索场景名称、描述、机器..." clearable size="small"
+                                    style="width: 210px;">
+                                    <template #prefix><i class="fa-solid fa-magnifying-glass"
+                                            style="color: #94a3b8;"></i></template>
+                                </el-input>
                             </div>
-                            <el-input v-model="scenarioSearchQuery" size="small" placeholder="搜索场景名称 / 描述 / 机器" clearable style="width: 240px;">
-                                <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
-                            </el-input>
+                            <div style="display: flex; gap: 10px;">
+                                <el-button size="small" type="primary" @click="openCreateScenarioDialog()">
+                                    <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>新建场景
+                                </el-button>
+                            </div>
                         </div>
 
-                        <el-table :data="filteredScenarios" v-loading="scenarioLoading" size="small"
-                            style="width: 100%" empty-text="暂无拨测场景，点击右上角【新建场景】创建业务链路">
-                            <el-table-column label="场景名称" min-width="180">
+                        <el-table :data="filteredScenarios" v-loading="scenarioLoading" style="width: 100%"
+                            empty-text="暂无拨测场景，可点击右上角【新建场景】创建业务链路">
+                            <el-table-column prop="id" label="ID" width="50" align="center"></el-table-column>
+                            <el-table-column label="场景名称" min-width="160">
                                 <template #default="{ row }">
-                                    <div style="display: flex; flex-direction: column; gap: 2px;">
-                                        <span style="font-weight: 600; color: #0f172a;">{{ row.name }}</span>
-                                        <span v-if="row.description" style="font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px;">{{ row.description }}</span>
+                                    <div style="display: flex; flex-direction: column;">
+                                        <div style="font-weight: 600; color: #0f172a; font-size: 13.5px;">{{ row.name }}</div>
+                                        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+                                            <i class="fa-solid fa-server" style="color: #10b981; margin-right: 4px;"></i>{{ row.machine_name || ('机器#' + row.machine_id) }}
+                                            <span v-if="row.description" style="color: #94a3b8; margin-left: 6px;">· {{ row.description }}</span>
+                                        </div>
                                     </div>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="业务链路步骤" min-width="320">
+                            <el-table-column label="所属环境" width="100" align="center">
                                 <template #default="{ row }">
-                                    <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                                        <template v-for="(step, idx) in (row.steps || [])" :key="idx">
-                                            <span style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; font-size: 11px;"
-                                                :style="getMethodBadgeStyle(step.http_method)">
-                                                <b>{{ step.http_method }}</b>
-                                                <span style="color: #334155;">{{ step.name || step.http_path }}</span>
-                                                <el-tooltip v-if="step.is_cleanup" content="清理步骤: 拨测引擎将保证其无论成败均执行" placement="top">
-                                                    <i class="fa-solid fa-broom" style="color: #d97706;"></i>
-                                                </el-tooltip>
-                                            </span>
-                                            <i v-if="idx < (row.steps || []).length - 1" class="fa-solid fa-arrow-right" style="font-size: 9px; color: #cbd5e1;"></i>
-                                        </template>
-                                    </div>
+                                    <el-tag size="small" :type="getGroupTagType(row.environment_name)" effect="light"
+                                        style="font-weight: 600;">
+                                        {{ row.environment_name || '默认环境' }}
+                                    </el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="归属环境" width="110">
-                                <template #default="{ row }">
-                                    <el-tag size="small" type="success" effect="plain">{{ row.environment_name }}</el-tag>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="宿主机器" width="130">
-                                <template #default="{ row }">
-                                    <span style="font-size: 12px; color: #475569;">{{ row.machine_name }}</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="拨测周期" width="90">
-                                <template #default="{ row }">
-                                    <span style="font-size: 12px; color: #475569;">{{ row.cron_interval_minutes }} 分钟</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="运行状态" width="110">
-                                <template #default="{ row }">
-                                    <span :class="getScenarioStatusBadgeClass(row.current_status)">{{ getScenarioStatusText(row.current_status) }}</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="操作" width="180" fixed="right">
-                                <template #default="{ row }">
-                                    <el-button size="small" link type="primary" @click="openEditScenarioDialog(row)">
-                                        <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
-                                    </el-button>
-                                    <el-tooltip content="立即执行整链拨测: 业务节点串行调用, 清理节点无论成败均执行" placement="top">
-                                        <el-button size="small" link type="success" :loading="scenarioRunningId === row.id"
-                                            @click="handleRunScenario(row)">
-                                            <i class="fa-solid fa-play" style="margin-right: 4px;"></i>执行
+                            <el-table-column min-width="280">
+                                <template #header>
+                                    <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                        <span>业务链路步骤</span>
+                                        <el-button link type="primary" size="small"
+                                            style="font-size: 11px; font-weight: normal; padding: 0 4px;"
+                                            @click="toggleAllScenarioStepsExpand">
+                                            <i :class="isAllScenarioStepsExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'"
+                                                style="margin-right: 3px; font-size: 10px;"></i>
+                                            {{ isAllScenarioStepsExpanded ? '全部收起' : '全部展开' }}
                                         </el-button>
-                                    </el-tooltip>
-                                    <el-popconfirm :title="`确定删除场景 [${row.name}] 吗？`" confirm-button-text="删除" cancel-button-text="取消"
-                                        @confirm="handleDeleteScenario(row)">
-                                        <template #reference>
-                                            <el-button size="small" link type="danger">
-                                                <i class="fa-solid fa-trash" style="margin-right: 4px;"></i>删除
-                                            </el-button>
+                                    </div>
+                                </template>
+                                <template #default="{ row }">
+                                    <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap; line-height: 1.4;">
+                                        <!-- 步骤节点列表：若未展开则至多显示前 2 个节点；若已展开则平铺显示全部 -->
+                                        <template v-for="(step, idx) in (isScenarioStepsExpanded(row.id) ? (row.steps || []) : (row.steps || []).slice(0, 2))" :key="idx">
+                                            <el-tooltip placement="top" :enterable="false">
+                                                <template #content>
+                                                    <div style="font-weight: 600;">节点 {{ idx + 1 }}: [{{ step.http_method }}] {{ step.name || step.http_path }}</div>
+                                                    <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">路径: {{ step.http_path }}</div>
+                                                    <template v-if="(row.last_steps_detail || [])[idx]">
+                                                        <div style="font-size: 11px; margin-top: 4px;">
+                                                            执行结果: <b :style="{ color: (row.last_steps_detail[idx].ok ? '#4ade80' : '#f87171') }">
+                                                                {{ (row.last_steps_detail[idx].ok ? '通过' : ((row.last_steps_detail[idx].skipped ? '已跳过' : '未通过'))) }}
+                                                                (HTTP {{ row.last_steps_detail[idx].status_code ?? '-' }})
+                                                            </b>
+                                                            <span style="margin-left: 6px;">耗时: {{ row.last_steps_detail[idx].latency_ms || 0 }}ms</span>
+                                                        </div>
+                                                        <div style="font-size: 11px; margin-top: 2px;">
+                                                            契约校验: 
+                                                            <span v-if="(row.last_steps_detail[idx].schema_configured)">
+                                                                <span v-if="row.last_steps_detail[idx].schema_matched === true" style="color: #4ade80; font-weight: 600;">一致 (通过)</span>
+                                                                <span v-else style="color: #f87171; font-weight: 600;">突变 ({{ (row.last_steps_detail[idx].schema_errors || []).map(e => e.message).join('; ') || '不匹配' }})</span>
+                                                            </span>
+                                                            <span v-else style="color: #94a3b8;">未配置契约</span>
+                                                        </div>
+                                                    </template>
+                                                    <template v-else>
+                                                        <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                                                            契约状态: {{ step.expected_schema && Object.keys(step.expected_schema).length ? '已配置契约 (待拨测)' : '未配置契约' }}
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                                <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11.5px; cursor: default; max-width: 170px;"
+                                                    :style="getMethodBadgeStyle(step.http_method)">
+                                                    <b style="flex-shrink: 0;">{{ step.http_method }}</b>
+                                                    <span style="color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="step.name || step.http_path">{{ step.name || step.http_path }}</span>
+                                                    <!-- 步骤契约状态图标 -->
+                                                    <template v-if="(row.last_steps_detail || [])[idx] && (row.last_steps_detail || [])[idx].schema_configured">
+                                                        <i v-if="(row.last_steps_detail || [])[idx].schema_matched === true"
+                                                            class="fa-solid fa-circle-check" style="color: #059669; font-size: 10px; flex-shrink: 0;" title="契约一致"></i>
+                                                        <i v-else-if="(row.last_steps_detail || [])[idx].schema_matched === false"
+                                                            class="fa-solid fa-triangle-exclamation" style="color: #dc2626; font-size: 10px; flex-shrink: 0;" title="契约突变"></i>
+                                                    </template>
+                                                    <template v-else-if="step.expected_schema && Object.keys(step.expected_schema).length">
+                                                        <i class="fa-solid fa-shield-halved" style="color: #64748b; font-size: 10px; flex-shrink: 0;" title="已配置契约(待校验)"></i>
+                                                    </template>
+                                                    <el-tooltip v-if="step.is_cleanup" content="清理步骤: 拨测引擎将保证其无论成败均执行" placement="top">
+                                                        <i class="fa-solid fa-broom" style="color: #d97706; flex-shrink: 0;"></i>
+                                                    </el-tooltip>
+                                                </span>
+                                            </el-tooltip>
+                                            <i v-if="idx < (isScenarioStepsExpanded(row.id) ? (row.steps || []).length - 1 : Math.min((row.steps || []).length - 1, 1))"
+                                                class="fa-solid fa-arrow-right" style="font-size: 9px; color: #cbd5e1;"></i>
                                         </template>
-                                    </el-popconfirm>
+
+                                        <!-- 多步骤折叠控制胶囊与悬浮全景预览 -->
+                                        <template v-if="(row.steps || []).length > 2">
+                                            <template v-if="!isScenarioStepsExpanded(row.id)">
+                                                <i class="fa-solid fa-arrow-right" style="font-size: 9px; color: #cbd5e1;"></i>
+                                                <el-popover placement="bottom-start" :width="380" trigger="hover">
+                                                    <template #reference>
+                                                        <el-tag size="small" type="info" effect="light" class="step-collapse-tag"
+                                                            style="cursor: pointer; font-size: 11px; font-weight: 600; user-select: none; border-color: #cbd5e1;"
+                                                            @click.stop="toggleScenarioStepsExpand(row.id)">
+                                                            +{{ (row.steps || []).length - 2 }} 步骤
+                                                            <i class="fa-solid fa-chevron-down" style="font-size: 10px; margin-left: 2px;"></i>
+                                                        </el-tag>
+                                                    </template>
+                                                    <!-- 浮层全景展示 -->
+                                                    <div style="font-size: 12px;">
+                                                        <div style="font-weight: 700; color: #0f172a; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                                            <span><i class="fa-solid fa-route" style="color: #f97316; margin-right: 5px;"></i>完整业务链路节点 (共 {{ row.steps.length }} 步)</span>
+                                                            <el-button link type="primary" size="small" @click.stop="toggleScenarioStepsExpand(row.id)">
+                                                                展开到表格
+                                                            </el-button>
+                                                        </div>
+                                                        <div style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;">
+                                                            <div v-for="(s, sIdx) in (row.steps || [])" :key="sIdx"
+                                                                style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;">
+                                                                <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+                                                                    <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">#{{ sIdx + 1 }}</span>
+                                                                    <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;"
+                                                                        :style="getMethodBadgeStyle(s.http_method)">{{ s.http_method }}</span>
+                                                                    <span style="font-weight: 600; color: #1e293b; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;" :title="s.name || s.http_path">
+                                                                        {{ s.name || s.http_path }}
+                                                                    </span>
+                                                                    <el-tag v-if="s.is_cleanup" size="small" type="warning" effect="plain" style="font-size: 10px; height: 18px; padding: 0 4px;">
+                                                                        清理
+                                                                    </el-tag>
+                                                                </div>
+                                                                <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; margin-left: 8px; flex-shrink: 0;">
+                                                                    <template v-if="(row.last_steps_detail || [])[sIdx]">
+                                                                        <span :style="{ color: (row.last_steps_detail[sIdx].ok ? '#059669' : '#dc2626'), fontWeight: '600' }">
+                                                                            {{ (row.last_steps_detail[sIdx].ok ? '✓ 通过' : '✗ 失败') }}
+                                                                        </span>
+                                                                        <span v-if="(row.last_steps_detail[sIdx].schema_configured)" style="margin-left: 3px;">
+                                                                            <el-tag size="small" :type="(row.last_steps_detail[sIdx].schema_matched ? 'success' : 'danger')" effect="plain" style="font-size: 10px; height: 18px; padding: 0 4px;">
+                                                                                {{ row.last_steps_detail[sIdx].schema_matched ? '契约一致' : '契约突变' }}
+                                                                            </el-tag>
+                                                                        </span>
+                                                                    </template>
+                                                                    <span v-else style="color: #94a3b8;">待拨测</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </el-popover>
+                                            </template>
+                                            <template v-else>
+                                                <el-tag size="small" type="info" effect="plain" class="step-collapse-tag"
+                                                    style="cursor: pointer; font-size: 11px; margin-left: 4px; user-select: none;"
+                                                    @click.stop="toggleScenarioStepsExpand(row.id)">
+                                                    收起 <i class="fa-solid fa-chevron-up" style="font-size: 10px; margin-left: 2px;"></i>
+                                                </el-tag>
+                                            </template>
+                                        </template>
+                                    </div>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="运行状态" width="115" align="center">
+                                <template #default="{ row }">
+                                    <span v-if="row.current_status === 'CIRCUIT_BROKEN'"
+                                        class="status-badge circuit-broken">
+                                        <i class="fa-solid fa-ban" style="margin-right: 4px;"></i>熔断挂起
+                                    </span>
+                                    <span v-else :class="getStatusBadgeClass(row.current_status)">
+                                        <i :class="getStatusIcon(row.current_status)" style="margin-right: 4px;"></i>
+                                        {{ row.current_status }}
+                                    </span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="整链耗时" width="110" align="center">
+                                <template #default="{ row }">
+                                    <div
+                                        v-if="row.last_total_latency_ms !== null && row.last_total_latency_ms !== undefined">
+                                        <span :class="getLatencyBadgeClass(row.last_total_latency_ms)">
+                                            {{ row.last_total_latency_ms }} ms
+                                        </span>
+                                    </div>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">待拨测</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="契约校验" width="90" align="center">
+                                <template #default="{ row }">
+                                    <el-tooltip v-if="row.last_schema_matched === true" placement="top">
+                                        <template #content>
+                                            <div style="font-weight: 600; margin-bottom: 2px;">整链各节点契约校验均通过:</div>
+                                            <div v-for="(d, di) in (row.last_steps_detail || []).filter(x => x.schema_configured)" :key="di" style="font-size: 11px;">
+                                                · 节点 {{ (d.step_index ?? di) + 1 }} [{{ d.name }}]: 契约一致
+                                            </div>
+                                        </template>
+                                        <el-tag type="success" size="small" style="cursor: pointer;">一致</el-tag>
+                                    </el-tooltip>
+                                    <el-tooltip v-else-if="row.last_schema_matched === false" placement="top">
+                                        <template #content>
+                                            <div style="font-weight: 600; color: #fecaca; margin-bottom: 2px;">检测到接口响应契约突变:</div>
+                                            <div v-for="(d, di) in (row.last_steps_detail || []).filter(x => x.schema_matched === false)" :key="di" style="font-size: 11px;">
+                                                · 节点 {{ (d.step_index ?? di) + 1 }} [{{ d.name }}]: {{ (d.schema_errors || []).map(e => e.message).join('; ') || '结构不匹配' }}
+                                            </div>
+                                        </template>
+                                        <el-tag type="danger" size="small" style="cursor: pointer;">突变</el-tag>
+                                    </el-tooltip>
+                                    <el-tag v-else-if="!row.schema_configured" type="info" effect="plain" size="small">未配置</el-tag>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="cron_interval_minutes" label="探测周期" width="95" align="center">
+                                <template #default="{ row }">
+                                    <el-tooltip :content="getIntervalTooltip(row.cron_interval_minutes, row.is_active)" placement="top">
+                                        <el-tag v-if="row.is_active === false" size="small" type="info" effect="plain"
+                                            class="probe-interval-tag"
+                                            style="cursor: pointer; font-size: 11px;" @click="toggleScenarioActive(row)">
+                                            <i class="fa-solid fa-pause" style="margin-right: 3px;"></i>已关闭
+                                        </el-tag>
+                                        <el-tag v-else size="small" type="primary" effect="plain"
+                                            class="probe-interval-tag"
+                                            style="cursor: pointer; font-weight: 600; font-size: 11px;" @click="toggleScenarioActive(row)">
+                                            <i class="fa-solid fa-clock" style="margin-right: 3px; font-size: 10px;"></i>{{ formatIntervalDisplay(row.cron_interval_minutes, row.is_active) }}
+                                        </el-tag>
+                                    </el-tooltip>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" align="center" fixed="right">
+                                <template #default="{ row }">
+                                    <div class="api-action-grid">
+                                        <el-button size="small" type="success" plain :loading="scenarioRunningId === row.id"
+                                            @click="handleRunScenario(row)">
+                                            <i class="fa-solid fa-bolt" style="margin-right: 4px;"></i>拨测
+                                        </el-button>
+                                        <el-button size="small" type="info" plain @click="openScenarioMetricsDrawer(row)">
+                                            <i class="fa-solid fa-chart-line" style="margin-right: 4px;"></i>时序
+                                        </el-button>
+                                        <el-button size="small" type="primary" plain @click="openEditScenarioDialog(row)">
+                                            <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
+                                        </el-button>
+                                        <el-popconfirm :title="'确定删除场景 [' + row.name + '] 吗？'" confirm-button-text="确定"
+                                            cancel-button-text="取消" @confirm="handleDeleteScenario(row)">
+                                            <template #reference>
+                                                <el-button size="small" type="danger" plain>
+                                                    <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除
+                                                </el-button>
+                                            </template>
+                                        </el-popconfirm>
+                                    </div>
                                 </template>
                             </el-table-column>
                         </el-table>
@@ -249,9 +445,15 @@
                                         </el-popconfirm>
                                         <div style="font-size: 10px; color: #94a3b8; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
                                             <span>节点 {{ idx + 1 }}</span>
-                                            <el-tooltip v-if="step.is_cleanup" content="清理步骤 (finally 语义)" placement="top">
-                                                <i class="fa-solid fa-broom" style="color: #d97706;"></i>
-                                            </el-tooltip>
+                                            <div style="display: flex; align-items: center; gap: 3px;">
+                                                <span v-if="step.expected_schema && Object.keys(step.expected_schema).length"
+                                                    style="font-size: 9px; color: #0284c7; background: #e0f2fe; padding: 1px 3px; border-radius: 3px;" title="已配置响应契约校验">
+                                                    <i class="fa-solid fa-shield-halved"></i> 契约
+                                                </span>
+                                                <el-tooltip v-if="step.is_cleanup" content="清理步骤 (finally 语义)" placement="top">
+                                                    <i class="fa-solid fa-broom" style="color: #d97706;"></i>
+                                                </el-tooltip>
+                                            </div>
                                         </div>
                                         <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
                                             <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" :style="getMethodBadgeStyle(step.http_method)">{{ step.http_method }}</span>
@@ -261,6 +463,20 @@
                                         </div>
                                         <div style="font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                                             {{ step.http_path || '/' }}
+                                        </div>
+                                        <div v-if="step._testResult" style="margin-top: 4px; font-size: 9.5px;">
+                                            <span v-if="step._testResult.schema_matched === true" style="color: #059669; font-weight: 600;">
+                                                <i class="fa-solid fa-circle-check"></i> 契约通过
+                                            </span>
+                                            <span v-else-if="step._testResult.schema_matched === false" style="color: #dc2626; font-weight: 600;">
+                                                <i class="fa-solid fa-triangle-exclamation"></i> 契约突变
+                                            </span>
+                                            <span v-else-if="step._testResult.ok" style="color: #059669;">
+                                                <i class="fa-solid fa-circle-check"></i> HTTP {{ step._testResult.status_code }}
+                                            </span>
+                                            <span v-else style="color: #dc2626;">
+                                                <i class="fa-solid fa-circle-xmark"></i> 调试失败
+                                            </span>
                                         </div>
                                     </div>
                                     <!-- 箭头连接 -->
@@ -951,6 +1167,14 @@
                                     <code style="font-size: 11px; color: #0284c7; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; word-break: break-all;">{{ row.http_path }}</code>
                                 </template>
                             </el-table-column>
+                            <el-table-column label="契约校验" width="90" align="center">
+                                <template #default="{ row }">
+                                    <el-tag v-if="row.last_schema_matched === true" type="success" size="small">一致</el-tag>
+                                    <el-tag v-else-if="row.last_schema_matched === false" type="danger" size="small">突变</el-tag>
+                                    <el-tag v-else-if="!row.schema_configured" type="info" effect="plain" size="small">未配置</el-tag>
+                                    <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
+                                </template>
+                            </el-table-column>
                             <el-table-column label="归属" width="150">
                                 <template #default="{ row }">
                                     <div style="font-size: 11.5px; color: #475569;">{{ row.machine_name }}</div>
@@ -1036,6 +1260,10 @@
                                             <i class="fa-solid fa-circle-exclamation" style="margin-right: 2px;"></i>契约突变
                                         </span>
                                     </template>
+                                    <template v-else>
+                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                        <span style="color: #94a3b8; font-size: 11px;">契约未配置</span>
+                                    </template>
                                 </div>
                                 <div v-if="d.schema_matched === false && (d.schema_errors || []).length"
                                     style="font-size: 11px; color: #dc2626; margin-bottom: 4px;">
@@ -1077,6 +1305,224 @@
                             暂无执行数据
                         </div>
                     </el-drawer>
+
+                    <!-- ================= 场景时序排障报表与历史流水抽屉 ================= -->
+                    <el-drawer v-model="scenarioMetricsDrawerVisible"
+                        :title="activeScenarioMetrics ? '场景专属时序排障报表 - ' + activeScenarioMetrics.name : '场景时序排障'"
+                        size="70%" destroy-on-close>
+                        <div v-if="activeScenarioMetrics" v-loading="scenarioMetricsLoading">
+                            <!-- 场景专属档案信息卡片 -->
+                            <div
+                                style="background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); padding: 14px 18px; border-radius: 8px; border: 1px solid #fed7aa; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(249,115,22,0.06);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                        <el-tag type="warning" effect="dark" style="font-weight: 700; font-size: 11.5px;">
+                                            <i class="fa-solid fa-diagram-project" style="margin-right: 4px;"></i>业务链路
+                                        </el-tag>
+                                        <span style="font-size: 15.5px; font-weight: 700; color: #0f172a;">{{ activeScenarioMetrics.name }}</span>
+                                        <el-tag size="small" type="primary" effect="light" style="font-weight: 600;">
+                                            {{ activeScenarioMetrics.environment_name || '默认环境' }}
+                                        </el-tag>
+                                        <span :class="getScenarioStatusBadgeClass(activeScenarioMetrics.last_status)" style="font-size: 11px;">
+                                            <i :class="activeScenarioMetrics.last_status === 'HEALTHY' ? 'fa-solid fa-circle-check' : (activeScenarioMetrics.last_status === 'FAIL' || activeScenarioMetrics.last_status === 'DOWN' ? 'fa-solid fa-circle-xmark' : 'fa-solid fa-clock')"
+                                                style="margin-right: 3px;"></i>
+                                            {{ getScenarioStatusText(activeScenarioMetrics.last_status) }}
+                                        </span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #64748b;">
+                                        <i class="fa-solid fa-clock" style="margin-right: 4px; color: #f97316;"></i>巡检周期:
+                                        <span v-if="activeScenarioMetrics.is_active === false" style="color: #ef4444; font-weight: 600;">已关闭自动拨测 (仅手动)</span>
+                                        <span v-else>每 {{ activeScenarioMetrics.cron_interval_minutes }} 分钟自动巡检</span>
+                                    </div>
+                                </div>
+                                <div
+                                    style="display: flex; gap: 16px; font-size: 12px; color: #334155; background: #ffffff; padding: 8px 12px; border-radius: 6px; border: 1px solid #fed7aa; flex-wrap: wrap; align-items: center;">
+                                    <div>
+                                        <span style="color: #64748b;">绑定宿主机:</span>
+                                        <b style="color: #0f172a; margin-left: 4px;">
+                                            <i class="fa-solid fa-server" style="color: #10b981; margin-right: 3px;"></i>{{ activeScenarioMetrics.machine_name || ('机器#' + activeScenarioMetrics.machine_id) }}
+                                        </b>
+                                    </div>
+                                    <div>
+                                        <span style="color: #64748b;">链路节点数:</span>
+                                        <b style="color: #0f172a; margin-left: 4px;">{{ activeScenarioMetrics.step_count || (activeScenarioMetrics.steps ? activeScenarioMetrics.steps.length : 0) }} 个节点</b>
+                                    </div>
+                                    <div v-if="activeScenarioMetrics.last_latency_ms !== null && activeScenarioMetrics.last_latency_ms !== undefined">
+                                        <span style="color: #64748b;">最近整链耗时:</span>
+                                        <b style="color: #ea580c; margin-left: 4px;">{{ activeScenarioMetrics.last_latency_ms }} ms</b>
+                                    </div>
+                                    <div>
+                                        <span style="color: #64748b;">契约状态:</span>
+                                        <span v-if="activeScenarioMetrics.last_schema_matched === true" style="color: #059669; font-weight: 600; margin-left: 4px;">
+                                            <i class="fa-solid fa-circle-check" style="margin-right: 2px;"></i>契约一致
+                                        </span>
+                                        <span v-else-if="activeScenarioMetrics.last_schema_matched === false" style="color: #dc2626; font-weight: 600; margin-left: 4px;">
+                                            <i class="fa-solid fa-triangle-exclamation" style="margin-right: 2px;"></i>契约突变
+                                        </span>
+                                        <span v-else style="color: #94a3b8; margin-left: 4px;">
+                                            {{ activeScenarioMetrics.schema_configured ? '待首次校验' : '未配置契约' }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ECharts 趋势图表卡片 -->
+                            <div
+                                style="background: #ffffff; padding: 18px 20px; border-radius: 8px; border: 1px solid #fed7aa; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(249,115,22,0.04);">
+                                <div
+                                    style="font-weight: 600; font-size: 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; color: #0f172a;">
+                                    <span>
+                                        <i class="fa-solid fa-chart-line" style="color: #f97316; margin-right: 6px;"></i>该场景历史耗时与执行趋势 (最近100次)
+                                    </span>
+                                    <span style="font-size: 12px; color: #64748b; font-weight: normal;">支持悬浮查看触发源、节点状态与契约结果</span>
+                                </div>
+                                <div id="scenarioChartContainer" style="width: 100%; height: 260px;"></div>
+                            </div>
+
+                            <!-- 场景历史流水明细 -->
+                            <div
+                                style="font-weight: 600; font-size: 14px; margin-bottom: 10px; color: #0f172a; display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <i class="fa-solid fa-clock-rotate-left" style="color: #f97316; margin-right: 6px;"></i>场景专属探测日志 (展开行查看各步骤现场、契约校验与提取变量)
+                                </div>
+                                <el-tag size="small" type="warning" effect="plain">{{ scenarioHistoryList.length }} 条运行流水</el-tag>
+                            </div>
+
+                            <el-table :data="scenarioHistoryList" style="width: 100%" size="small"
+                                empty-text="当前场景暂无探测历史，可点击列表【执行】立即生成探测流水">
+                                <el-table-column type="expand">
+                                    <template #default="{ row: hRow }">
+                                        <div style="padding: 12px 18px; background: #fffaf5; border-radius: 6px; border: 1px solid #fed7aa;">
+                                            <div v-if="hRow.error_message" style="margin-bottom: 10px; padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; color: #dc2626; font-size: 12px;">
+                                                <i class="fa-solid fa-circle-exclamation" style="margin-right: 4px;"></i>整链异常: {{ hRow.error_message }}
+                                            </div>
+                                            <div style="font-weight: 600; font-size: 12.5px; color: #334155; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                                <i class="fa-solid fa-list-check" style="color: #f97316;"></i>步骤执行快照 (共 {{ (hRow.steps_detail || []).length }} 步):
+                                            </div>
+                                            <div v-for="(sd, sIdx) in (hRow.steps_detail || [])" :key="sIdx"
+                                                style="padding: 10px 12px; margin-bottom: 8px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px;">
+                                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+                                                    <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">#{{ sIdx + 1 }}</span>
+                                                    <span style="font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px;"
+                                                        :style="getMethodBadgeStyle(sd.http_method)">{{ sd.http_method }}</span>
+                                                    <span style="font-weight: 600; color: #0f172a;">{{ sd.name }}</span>
+                                                    <el-tag v-if="sd.is_cleanup" size="small" type="warning" effect="plain">
+                                                        <i class="fa-solid fa-broom" style="margin-right: 2px;"></i>清理步骤
+                                                    </el-tag>
+                                                    <span style="margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px;"
+                                                        :style="getStepResultBadge(sd).style">{{ getStepResultBadge(sd).text }}</span>
+                                                </div>
+                                                <div style="font-size: 11.5px; color: #64748b; margin-bottom: 6px; word-break: break-all;">
+                                                    <code style="background: #f1f5f9; color: #0284c7; padding: 1px 6px; border-radius: 4px;">{{ sd.http_path }}</code>
+                                                    <template v-if="sd.status_code !== null && sd.status_code !== undefined">
+                                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                                        HTTP <b :style="{ color: sd.ok ? '#059669' : '#dc2626' }">{{ sd.status_code }}</b>
+                                                    </template>
+                                                    <template v-if="sd.latency_ms !== null && sd.latency_ms !== undefined">
+                                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                                        {{ sd.latency_ms }} ms
+                                                    </template>
+                                                    <template v-if="sd.schema_configured">
+                                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                                        <span v-if="sd.schema_matched" style="color: #059669; font-weight: 600;">
+                                                            <i class="fa-solid fa-circle-check" style="margin-right: 2px;"></i>契约通过
+                                                        </span>
+                                                        <span v-else style="color: #dc2626; font-weight: 600;">
+                                                            <i class="fa-solid fa-circle-exclamation" style="margin-right: 2px;"></i>契约突变
+                                                        </span>
+                                                    </template>
+                                                    <template v-else>
+                                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                                        <span style="color: #94a3b8; font-size: 11px;">契约未配置</span>
+                                                    </template>
+                                                </div>
+                                                <div v-if="sd.schema_matched === false && (sd.schema_errors || []).length"
+                                                    style="font-size: 11px; color: #dc2626; margin-bottom: 4px; padding-left: 2px;">
+                                                    <span v-for="(se, sei) in sd.schema_errors.slice(0, 3)" :key="sei" style="display: block;">
+                                                        · 破坏性变更: [{{ se.field }}] {{ se.message }}
+                                                    </span>
+                                                </div>
+                                                <div v-if="sd.error" style="font-size: 11.5px; color: #dc2626; margin-bottom: 4px;">
+                                                    <i class="fa-solid fa-circle-exclamation" style="margin-right: 3px;"></i>{{ sd.error }}
+                                                </div>
+                                                <div v-if="sd.skipped" style="font-size: 11.5px; color: #94a3b8;">
+                                                    <i class="fa-solid fa-forward" style="margin-right: 3px;"></i>前序节点失败, 该节点未执行
+                                                </div>
+                                                <div v-if="sd.assertions_summary && sd.assertions_summary.total > 0" style="font-size: 11.5px; margin-bottom: 4px;">
+                                                    <i :class="sd.assertions_summary.all_passed ? 'fa-solid fa-circle-check' : 'fa-solid fa-circle-xmark'"
+                                                        :style="{ color: sd.assertions_summary.all_passed ? '#10b981' : '#ef4444', marginRight: '3px' }"></i>
+                                                    <span :style="{ color: sd.assertions_summary.all_passed ? '#059669' : '#dc2626' }">
+                                                        断言 {{ sd.assertions_summary.passed_count }}/{{ sd.assertions_summary.total }} 通过
+                                                    </span>
+                                                    <span v-for="(a, ai) in (sd.assertions_result || []).filter(x => !x.passed)" :key="ai"
+                                                        style="display: block; color: #dc2626; padding-left: 16px;">
+                                                        · {{ a.name }}: {{ a.message || '未通过' }}
+                                                    </span>
+                                                </div>
+                                                <div v-if="sd.extracted_variables && Object.keys(sd.extracted_variables).length"
+                                                    style="font-size: 11.5px; color: #1d4ed8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;">
+                                                    <i class="fa-solid fa-link" style="color: #2563eb;"></i>提取变量:
+                                                    <el-tag v-for="(v, k) in sd.extracted_variables" :key="k" size="small" effect="plain" type="primary">
+                                                        {{ k }} = {{ v }}
+                                                    </el-tag>
+                                                </div>
+                                                <div v-if="sd.response_snippet" style="margin-top: 6px;">
+                                                    <pre style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 8px; font-size: 10.5px; color: #475569; max-height: 120px; overflow: auto; margin: 0; white-space: pre-wrap; word-break: break-all;">{{ sd.response_snippet }}</pre>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="执行时间" width="160">
+                                    <template #default="{ row: hRow }">{{ formatTime(hRow.probed_at) }}</template>
+                                </el-table-column>
+                                <el-table-column label="触发方式" width="95" align="center">
+                                    <template #default="{ row: hRow }">
+                                        <el-tag v-if="hRow.trigger === 'manual'" size="small" type="primary" effect="plain">手动触发</el-tag>
+                                        <el-tag v-else size="small" type="info" effect="plain">定时调度</el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="整链状态" width="100" align="center">
+                                    <template #default="{ row: hRow }">
+                                        <span v-if="hRow.is_success" style="color: #059669; font-weight: 600;">
+                                            <i class="fa-solid fa-circle-check" style="margin-right: 3px;"></i>整链成功
+                                        </span>
+                                        <span v-else style="color: #dc2626; font-weight: 600;">
+                                            <i class="fa-solid fa-circle-xmark" style="margin-right: 3px;"></i>存在失败
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="整链总耗时" width="110" align="center">
+                                    <template #default="{ row: hRow }">
+                                        <span v-if="hRow.total_latency_ms !== null && hRow.total_latency_ms !== undefined"
+                                            :class="getLatencyBadgeClass(hRow.total_latency_ms)">
+                                            {{ hRow.total_latency_ms }} ms
+                                        </span>
+                                        <span v-else style="color: var(--text-muted); font-size: 12px;">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="契约校验" width="110" align="center">
+                                    <template #default="{ row: hRow }">
+                                        <el-tag v-if="hRow.schema_matched === true" type="success" size="small">
+                                            <i class="fa-solid fa-circle-check" style="margin-right: 2px;"></i>完全匹配
+                                        </el-tag>
+                                        <el-tag v-else-if="hRow.schema_matched === false" type="danger" size="small">
+                                            <i class="fa-solid fa-triangle-exclamation" style="margin-right: 2px;"></i>契约突变
+                                        </el-tag>
+                                        <span v-else style="color: #94a3b8; font-size: 12px;">未配置</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="步骤执行数" width="110" align="center">
+                                    <template #default="{ row: hRow }">
+                                        <span style="font-size: 12px; color: #475569;">
+                                            {{ (hRow.steps_detail || []).filter(s => s.ok).length }}/{{ (hRow.steps_detail || []).length }} 步
+                                        </span>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </div>
+                    </el-drawer>
                 </div>
 </template>
 
@@ -1099,16 +1545,26 @@ export default {
             scenarioLoading: wb.scenarioLoading,
             scenarioSearchQuery: wb.scenarioSearchQuery,
             selectedScenarioEnv: wb.selectedScenarioEnv,
+            selectedScenarioMachine: wb.selectedScenarioMachine,
+            selectedScenarioStatus: wb.selectedScenarioStatus,
+            toggleScenarioActive: wb.toggleScenarioActive,
             filteredScenarios: wb.filteredScenarios,
             scenarioTotalCount: wb.scenarioTotalCount,
             scenarioActiveCount: wb.scenarioActiveCount,
             scenarioCleanupCount: wb.scenarioCleanupCount,
             scenarioStepTotalCount: wb.scenarioStepTotalCount,
+            openCreateScenarioDialog: wb.openCreateScenarioDialog,
             openEditScenarioDialog: wb.openEditScenarioDialog,
             handleDeleteScenario: wb.handleDeleteScenario,
             getMethodBadgeStyle: wb.getMethodBadgeStyle,
             getScenarioStatusBadgeClass: wb.getScenarioStatusBadgeClass,
             getScenarioStatusText: wb.getScenarioStatusText,
+            getStatusBadgeClass: wb.getStatusBadgeClass,
+            getStatusIcon: wb.getStatusIcon,
+            getGroupTagType: wb.getGroupTagType,
+            getLatencyBadgeClass: wb.getLatencyBadgeClass,
+            getIntervalTooltip: wb.getIntervalTooltip,
+            formatIntervalDisplay: wb.formatIntervalDisplay,
             // 场景拨测域: 对话框与业务链路步骤
             scenarioDialogVisible: wb.scenarioDialogVisible,
             editingScenarioId: wb.editingScenarioId,
@@ -1174,7 +1630,19 @@ export default {
             openApiImportDialog: wb.openApiImportDialog,
             handleApiImportSelectionChange: wb.handleApiImportSelectionChange,
             confirmImportApisAsSteps: wb.confirmImportApisAsSteps,
-            fillActiveStepFromApi: wb.fillActiveStepFromApi
+            fillActiveStepFromApi: wb.fillActiveStepFromApi,
+            // 场景时序排障与历史流水
+            scenarioMetricsDrawerVisible: wb.scenarioMetricsDrawerVisible,
+            scenarioMetricsLoading: wb.scenarioMetricsLoading,
+            activeScenarioMetrics: wb.activeScenarioMetrics,
+            scenarioHistoryList: wb.scenarioHistoryList,
+            openScenarioMetricsDrawer: wb.openScenarioMetricsDrawer,
+            formatTime: wb.formatTime,
+            // 业务链路步骤折叠与展开
+            isScenarioStepsExpanded: wb.isScenarioStepsExpanded,
+            toggleScenarioStepsExpand: wb.toggleScenarioStepsExpand,
+            isAllScenarioStepsExpanded: wb.isAllScenarioStepsExpanded,
+            toggleAllScenarioStepsExpand: wb.toggleAllScenarioStepsExpand
         }
     }
 }

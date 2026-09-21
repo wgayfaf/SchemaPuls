@@ -161,6 +161,7 @@ class ScenarioProbe(SQLModel, table=True):
     current_status: str = Field(default="UNKNOWN")      # HEALTHY, DOWN, UNKNOWN
     last_run_at: Optional[datetime] = None
     last_total_latency_ms: Optional[float] = None
+    last_schema_matched: Optional[bool] = None          # 整链最新契约校验结果 (True=一致, False=突变, None=未配置或未校验)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

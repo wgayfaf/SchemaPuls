@@ -338,7 +338,18 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
     is_success = bool(business_results) and all(d.get("ok") for d in business_results)
     error_message = None if is_success else (abort_reason or "业务链路存在失败节点")
 
-    # 7. 持久化执行结果与场景状态; 同步环境变量更新
+    # 7. 计算整链契约校验结果 (供场景列表展示一致/突变/未配置)
+    configured_steps = [d for d in steps_detail if d.get("schema_configured")]
+    if not configured_steps:
+        last_schema_matched = None
+    elif any(d.get("schema_matched") is False for d in configured_steps):
+        last_schema_matched = False
+    elif all(d.get("schema_matched") is True for d in configured_steps):
+        last_schema_matched = True
+    else:
+        last_schema_matched = None
+
+    # 8. 持久化执行结果与场景状态; 同步环境变量更新
     with Session(engine) as session:
         if all_updated_env and env_id:
             try:
@@ -358,6 +369,7 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
             scenario.current_status = "HEALTHY" if is_success else "DOWN"
             scenario.last_run_at = now
             scenario.last_total_latency_ms = total_latency_ms
+            scenario.last_schema_matched = last_schema_matched
             session.add(scenario)
 
         history = ScenarioProbeHistory(
@@ -377,7 +389,15 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
 
 
 def serialize_scenario_history(h: ScenarioProbeHistory) -> dict:
-    """场景拨测历史流水序列化 (供前端结果抽屉渲染)"""
+    """场景拨测历史流水序列化 (供前端结果抽屉与时序排障报表渲染)"""
+    cfg_steps = [d for d in (h.steps_detail or []) if d.get("schema_configured")]
+    schema_matched = None
+    if cfg_steps:
+        if any(d.get("schema_matched") is False for d in cfg_steps):
+            schema_matched = False
+        elif all(d.get("schema_matched") is True for d in cfg_steps):
+            schema_matched = True
+
     return {
         "id": h.id,
         "scenario_id": h.scenario_id,
@@ -385,6 +405,8 @@ def serialize_scenario_history(h: ScenarioProbeHistory) -> dict:
         "trigger": h.trigger,
         "is_success": h.is_success,
         "total_latency_ms": h.total_latency_ms,
+        "schema_matched": schema_matched,
+        "schema_configured": bool(cfg_steps),
         "steps_detail": h.steps_detail or [],
         "error_message": h.error_message,
         "probed_at": h.probed_at.isoformat() if h.probed_at else None,

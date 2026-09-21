@@ -142,7 +142,17 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass
-                
+
+        scenario_columns_to_add = [
+            ("last_schema_matched", "BOOLEAN"),
+        ]
+        for col_name, col_def in scenario_columns_to_add:
+            try:
+                conn.execute(text(f"ALTER TABLE scenario_probes ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception:
+                pass
+
         # 自动清理已删除接口/机器残留的孤儿历史与幽灵老目标，保证系统数据源 100% 严格一致
         try:
             conn.execute(text("DELETE FROM api_probe_histories WHERE api_probe_id NOT IN (SELECT id FROM api_probes)"))

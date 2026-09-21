@@ -1082,7 +1082,16 @@
             box-sizing: border-box !important;
             border-radius: 4px !important;
         }
+        /* 场景步骤折叠展开胶囊样式 */
+        .step-collapse-tag {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid #cbd5e1 !important;
+        }
 
-
-
+        .step-collapse-tag:hover {
+            color: #f97316 !important;
+            border-color: #f97316 !important;
+            background-color: #fff7ed !important;
+            box-shadow: 0 1px 4px rgba(249, 115, 22, 0.15);
+        }
 
