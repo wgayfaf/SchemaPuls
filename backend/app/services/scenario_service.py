@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 
 from app.models import Environment, ServiceGroup, MachineNode, ScenarioProbe, ScenarioProbeHistory
 from app.database import engine
-from app.services.probe_service import check_http_detailed
+from app.services.probe_service import check_http_detailed, check_schema
 from app.services.template_engine import (
     render_macro_string,
     parse_params_to_dict,
@@ -59,7 +59,7 @@ async def execute_scenario_step(
         step_index: 节点序号 (用于结果展示)
 
     Returns:
-        (step_result: 节点执行明细 dict, updated_env_vars: 需持久化回环境变量池的键值)
+        (step_result: 节点执行明细 dict, updated_env_vars: 需持久化回环境变量池的键值, json_data: 完整 JSON 响应)
     """
     http_method = (step.get("http_method") or "GET").upper()
     http_path = step.get("http_path") or "/"
@@ -73,6 +73,7 @@ async def execute_scenario_step(
     else:
         http_body_type = "none"
     http_body = step.get("http_body")
+    expected_schema = step.get("expected_schema") or None
     auth_type = step.get("auth_type") or "none"
     auth_config = dict(step.get("auth_config") or {})
     pre_actions = step.get("pre_actions") or []
@@ -93,6 +94,9 @@ async def execute_scenario_step(
         "assertions_summary": None,
         "extracted_variables": {},
         "response_snippet": None,
+        "schema_configured": bool(expected_schema),
+        "schema_matched": None,
+        "schema_errors": [],
         "script_error": None,
     }
 
@@ -162,6 +166,18 @@ async def execute_scenario_step(
     if json_data is not None:
         result["response_snippet"] = json.dumps(json_data, ensure_ascii=False)[:500]
 
+    # Schema 契约校验 (与接口探针同规则: 未配置契约不参与健康判定, 避免空 Schema {} 接受一切的假象)
+    if json_data is not None:
+        if not expected_schema:
+            result["schema_matched"] = None
+        elif http_ok:
+            matched, schema_errors = check_schema(json_data, expected_schema)
+            result["schema_matched"] = matched
+            result["schema_errors"] = schema_errors
+    elif expected_schema:
+        result["schema_matched"] = False
+        result["schema_errors"] = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
+
     # 5. 执行后置操作 (断言校验 + 变量提取)
     all_assertions_passed, assertions_result, extracted_vars, post_updated_env = execute_post_actions(
         post_actions=post_actions,
@@ -182,8 +198,8 @@ async def execute_scenario_step(
     result["extracted_variables"] = extracted_vars
     result["script_error"] = variables.get("_script_error")
 
-    # 6. 健康判定: HTTP 成功 + 全部断言通过
-    result["ok"] = bool(http_ok and (http_code == 200) and all_assertions_passed)
+    # 6. 健康判定: HTTP 成功 + Schema 契约未突变 + 全部断言通过
+    result["ok"] = bool(http_ok and (http_code == 200) and (result["schema_matched"] is not False) and all_assertions_passed)
 
     # 7. 提取变量注入场景共享变量池 (供后续节点 {{引用}}), 并收集需持久化的环境变量
     variable_pool.update({k: v for k, v in extracted_vars.items() if k})
@@ -191,7 +207,7 @@ async def execute_scenario_step(
     updated_env.update(pre_updated_env)
     updated_env.update(post_updated_env)
 
-    return result, updated_env
+    return result, updated_env, json_data
 
 
 # ==========================================================
@@ -279,7 +295,7 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
             })
             continue
         try:
-            step_result, updated_env = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
+            step_result, updated_env, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
             all_updated_env.update(updated_env)
             steps_detail.append(step_result)
             if not step_result.get("ok"):
@@ -301,7 +317,7 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
     # 5. 清理节点: 无论业务链路成败均执行 (finally 语义)
     for idx, step in cleanup_steps:
         try:
-            step_result, updated_env = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
+            step_result, updated_env, _resp = await execute_scenario_step(step, base_url, variable_pool, step_index=idx)
             all_updated_env.update(updated_env)
             steps_detail.append(step_result)
         except Exception as step_err:

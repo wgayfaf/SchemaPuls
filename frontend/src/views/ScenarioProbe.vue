@@ -306,8 +306,8 @@
                                     </el-button>
                                     <span style="color: #64748b;">
                                         机器默认地址:
-                                        <code
-                                            style="background: #e2e8f0; color: #0284c7; padding: 2px 6px; border-radius: 4px; font-family: monospace;">{{ scenarioForm.base_url }}</code>
+                                        <co
+                                            style="background: #e2e8f0; color: #0284c7; padding: 2px 6px; border-radius: 4px; font-family: monospace;">{{ scenarioForm.base_url }}</co>
                                     </span>
                                     <el-tooltip content="点击将当前宿主机器的默认基准地址同步填入下方输入框" placement="top">
                                         <el-button size="small" link type="primary" @click="resetScenarioBaseUrlToMachine">
@@ -584,6 +584,46 @@
                                     </div>
                                 </el-tab-pane>
 
+                                <!-- 6. Schema 契约标签页 -->
+                                <el-tab-pane label="Schema" name="schema">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                                        <span style="font-size: 12px; color: #64748b;">
+                                            标准的 JSON Schema 规范 (Draft-7)，拨测时将自动验证该节点真实响应是否破坏此契约
+                                        </span>
+                                        <div style="display: flex; gap: 8px;">
+                                            <el-button size="small" type="primary" plain @click="formatStepSchemaJson">
+                                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>格式化 Schema
+                                            </el-button>
+                                            <el-button size="small" type="primary" plain @click="inferStepSchemaFromTestResult"
+                                                :disabled="!stepTestResult || !stepTestResult.response_data">
+                                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从当前响应推导
+                                            </el-button>
+                                        </div>
+                                    </div>
+                                    <div class="pm-code-box">
+                                        <el-input v-model="activeStep.schema_text" type="textarea" :rows="8"
+                                            placeholder="默认留空（不强校验 Schema）。可先发送调试请求后，点击【从当前响应推导】一键自动填入 Draft-7 契约规则"></el-input>
+                                    </div>
+
+                                    <!-- 备选手动推导折叠卡片 -->
+                                    <div style="margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
+                                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                            <span><i class="fa-solid fa-code" style="margin-right: 4px; color: #64748b;"></i>从自定义 JSON 样本辅助推导</span>
+                                            <div style="display: flex; gap: 6px;">
+                                                <el-button size="small" text type="primary" @click="stepSchemaSampleJson = safeFormatJson(stepSchemaSampleJson)"
+                                                    :disabled="!stepSchemaSampleJson || !stepSchemaSampleJson.trim()">
+                                                    <i class="fa-solid fa-align-left" style="margin-right: 4px;"></i>格式化样本
+                                                </el-button>
+                                                <el-button size="small" text type="primary" @click="inferStepSchemaFromSample" :loading="stepInferring">
+                                                    <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>执行推导
+                                                </el-button>
+                                            </div>
+                                        </div>
+                                        <el-input v-model="stepSchemaSampleJson" type="textarea" :rows="2"
+                                            placeholder="在此粘贴外部已有的响应 JSON 文本，点击执行推导即可覆盖上方 Schema 规则"></el-input>
+                                    </div>
+                                </el-tab-pane>
+
                                 <!-- 5. 前置操作 (Pre-request) 标签页 -->
                                 <el-tab-pane label="前置操作" name="pre_actions">
                                     <div class="pm-preset-bar">
@@ -799,6 +839,16 @@
                                             <span class="pm-badge-latency">
                                                 <i class="fa-regular fa-clock" style="margin-right: 3px;"></i>{{ stepTestResult.latency_ms || 0 }} ms
                                             </span>
+                                            <span v-if="stepTestResult.schema_matched" class="pm-badge-schema-ok">
+                                                <i class="fa-solid fa-circle-check"></i> 契约校验通过
+                                            </span>
+                                            <span v-else-if="stepTestResult.schema_matched === false" class="pm-badge-schema-err"
+                                                :title="(stepTestResult.schema_errors || []).map(e => e.message).join('; ')">
+                                                <i class="fa-solid fa-circle-exclamation"></i> 契约不匹配
+                                            </span>
+                                            <span v-else class="pm-badge-schema-plain" style="color: #94a3b8;">
+                                                <i class="fa-solid fa-circle-minus"></i> 契约未配置 (可在 Schema 标签页从响应推导)
+                                            </span>
                                             <span v-if="stepTestResult.assertions_summary"
                                                 :class="stepTestResult.assertions_summary.all_passed ? 'pm-badge-schema-ok' : 'pm-badge-schema-err'"
                                                 :title="'共执行 ' + stepTestResult.assertions_summary.total + ' 项断言, 通过 ' + stepTestResult.assertions_summary.passed_count + ' 项'">
@@ -977,6 +1027,21 @@
                                         <span style="margin: 0 6px; color: #cbd5e1;">|</span>
                                         {{ d.latency_ms }} ms
                                     </template>
+                                    <template v-if="d.schema_configured">
+                                        <span style="margin: 0 6px; color: #cbd5e1;">|</span>
+                                        <span v-if="d.schema_matched" style="color: #059669; font-weight: 600;">
+                                            <i class="fa-solid fa-circle-check" style="margin-right: 2px;"></i>契约通过
+                                        </span>
+                                        <span v-else style="color: #dc2626; font-weight: 600;">
+                                            <i class="fa-solid fa-circle-exclamation" style="margin-right: 2px;"></i>契约突变
+                                        </span>
+                                    </template>
+                                </div>
+                                <div v-if="d.schema_matched === false && (d.schema_errors || []).length"
+                                    style="font-size: 11px; color: #dc2626; margin-bottom: 4px;">
+                                    <span v-for="(se, sei) in d.schema_errors.slice(0, 3)" :key="sei" style="display: block; padding-left: 2px;">
+                                        · {{ se.field }}: {{ se.message }}
+                                    </span>
                                 </div>
                                 <div v-if="d.error" style="font-size: 11.5px; color: #dc2626; margin-bottom: 4px;">
                                     <i class="fa-solid fa-circle-exclamation" style="margin-right: 3px;"></i>{{ d.error }}
@@ -1092,6 +1157,13 @@ export default {
             handleRunScenario: wb.handleRunScenario,
             getStepResultBadge: wb.getStepResultBadge,
             handleTestRunStep: wb.handleTestRunStep,
+            // 节点 Schema 契约
+            stepSchemaSampleJson: wb.stepSchemaSampleJson,
+            stepInferring: wb.stepInferring,
+            formatStepSchemaJson: wb.formatStepSchemaJson,
+            inferStepSchemaFromSample: wb.inferStepSchemaFromSample,
+            inferStepSchemaFromTestResult: wb.inferStepSchemaFromTestResult,
+            safeFormatJson: wb.safeFormatJson,
             // 从接口管理导入接口为链路节点
             apiImportDialogVisible: wb.apiImportDialogVisible,
             apiImportSearch: wb.apiImportSearch,

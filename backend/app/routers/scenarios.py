@@ -166,9 +166,11 @@ async def test_scenario_step(data: ScenarioStepTestPayload, session: Session = D
     base_url = _resolve_base_url(data.base_url, machine)
 
     variable_pool: Dict[str, Any] = dict(env_variables)
-    result, updated_env = await execute_scenario_step(
+    result, updated_env, json_data = await execute_scenario_step(
         data.step or {}, base_url, variable_pool, step_index=0
     )
+    # 单步调试透出完整 JSON 响应 (供前端一键推导 Schema; 历史流水仅存截断 snippet)
+    result["response_data"] = json_data
 
     # 调试产生的环境变量更新同样同步持久化 (与接口管理 test-run 行为一致)
     if updated_env and env:

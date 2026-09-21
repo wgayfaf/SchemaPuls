@@ -14,6 +14,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import axios from 'axios'
 import { machineList, environmentList, apiList } from './core'
 import { fetchMachineEnvironment, currentMachineEnvironment } from './machines'
+import { safeFormatJson } from './apis'
 
 // ================= 列表与筛选状态 =================
 const scenarioList = ref([])
@@ -131,6 +132,7 @@ const createEmptyStep = () => ({
     post_actions: [
         { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", description: "" }
     ],
+    schema_text: "",
     is_cleanup: false
 })
 
@@ -471,6 +473,7 @@ const mapApiToScenarioStep = (api) => {
         auth_config: Object.assign({ token: '', username: '', password: '', header_key: 'Authorization', header_value: '' }, api.auth_config || {}),
         pre_actions: Array.isArray(api.pre_actions) ? api.pre_actions.map(a => ({ ...a })) : [],
         post_actions: Array.isArray(api.post_actions) ? api.post_actions.map(a => ({ ...a })) : [],
+        schema_text: api.expected_schema ? JSON.stringify(api.expected_schema, null, 2) : "",
         // DELETE 接口语义上即为清理脏数据, 批量导入时自动标记为清理步骤 (finally 语义)
         is_cleanup: (api.http_method || '').toUpperCase() === 'DELETE'
     }
@@ -516,21 +519,39 @@ const fillActiveStepFromApi = (api) => {
 }
 
 // ================= 拨测执行引擎 =================
+// 解析步骤的 Schema 文本为 Draft-7 对象 (非法 JSON 时返回 null 并提示)
+const parseStepSchema = (s) => {
+    if (!s.schema_text || !s.schema_text.trim()) return null
+    try {
+        const parsed = JSON.parse(s.schema_text)
+        return parsed && typeof parsed === 'object' ? parsed : null
+    } catch (e) {
+        return undefined // 区分: 非法 JSON
+    }
+}
+
 // 单步骤载荷构建 (与 buildStepsPayload 保持同一套过滤规则, 供整链提交与单步调试共用)
-const buildStepPayload = (s) => ({
-    name: (s.name || '').trim(),
-    http_method: s.http_method,
-    http_path: (s.http_path || '/').trim(),
-    http_params: (s.http_params || []).filter(p => p.enabled && p.key && p.key.trim() !== ''),
-    http_headers: (s.http_headers || []).filter(h => h.enabled && h.key && h.key.trim() !== '' && !h.isSystem),
-    http_body_type: s.http_body_type || 'none',
-    http_body: s.http_body_type !== 'none' ? s.http_body : null,
-    auth_type: s.auth_type || 'none',
-    auth_config: s.auth_type !== 'none' ? (s.auth_config || {}) : null,
-    pre_actions: (s.pre_actions || []).filter(a => a.enabled && (a.key || a.value || a.type === 'custom_script' || a.type === 'javascript')),
-    post_actions: (s.post_actions || []).filter(a => a.enabled && a.type),
-    is_cleanup: !!s.is_cleanup
-})
+const buildStepPayload = (s) => {
+    const schemaParsed = parseStepSchema(s)
+    if (schemaParsed === undefined) {
+        ElMessage.warning(`节点 [${s.name || '未命名'}] 的 Schema 不是合法 JSON, 已忽略该契约规则`)
+    }
+    return {
+        name: (s.name || '').trim(),
+        http_method: s.http_method,
+        http_path: (s.http_path || '/').trim(),
+        http_params: (s.http_params || []).filter(p => p.enabled && p.key && p.key.trim() !== ''),
+        http_headers: (s.http_headers || []).filter(h => h.enabled && h.key && h.key.trim() !== '' && !h.isSystem),
+        http_body_type: s.http_body_type || 'none',
+        http_body: s.http_body_type !== 'none' ? s.http_body : null,
+        auth_type: s.auth_type || 'none',
+        auth_config: s.auth_type !== 'none' ? (s.auth_config || {}) : null,
+        pre_actions: (s.pre_actions || []).filter(a => a.enabled && (a.key || a.value || a.type === 'custom_script' || a.type === 'javascript')),
+        post_actions: (s.post_actions || []).filter(a => a.enabled && a.type),
+        expected_schema: schemaParsed === undefined ? null : schemaParsed,
+        is_cleanup: !!s.is_cleanup
+    }
+}
 
 const buildStepsPayload = () => {
     return scenarioSteps.value.map(buildStepPayload)
@@ -610,6 +631,75 @@ const handleTestRunStep = async () => {
     }
 }
 
+// ================= Schema 契约 (节点级) =================
+const stepSchemaSampleJson = ref("")
+const stepInferring = ref(false)
+
+const formatStepSchemaJson = () => {
+    if (!activeStep.value) return
+    if (!activeStep.value.schema_text || !activeStep.value.schema_text.trim()) {
+        ElMessage.warning("当前 Schema 内容为空，无需格式化")
+        return
+    }
+    try {
+        activeStep.value.schema_text = safeFormatJson(activeStep.value.schema_text)
+        ElMessage.success("Schema 契约规则格式化完成！")
+    } catch (err) {
+        ElMessage.error("Schema 格式错误: " + (err.message || "无法解析有效 JSON"))
+    }
+}
+
+// 从自定义 JSON 样本推导 Draft-7 Schema
+const inferStepSchemaFromSample = async () => {
+    if (!activeStep.value) return
+    if (!stepSchemaSampleJson.value.trim()) {
+        ElMessage.warning("请先粘贴真实的响应 JSON 样本")
+        return
+    }
+    stepInferring.value = true
+    try {
+        const parsed = JSON.parse(stepSchemaSampleJson.value)
+        const res = await axios.post("/api/tools/infer-schema", { sample_json: parsed, strict_mode: false })
+        const schemaObj = (res.data && res.data.schema) ? res.data.schema : res.data
+        activeStep.value.schema_text = JSON.stringify(schemaObj, null, 2)
+        ElMessage.success("成功从样本推导生成 Draft-7 契约规则！")
+    } catch (err) {
+        ElMessage.error("推导失败: " + (err.response?.data?.detail || err.message))
+    } finally {
+        stepInferring.value = false
+    }
+}
+
+// 从当前节点调试响应一键推导 Schema
+const inferStepSchemaFromTestResult = async () => {
+    if (!activeStep.value) return
+    if (!stepTestResult.value || !stepTestResult.value.response_snippet) {
+        ElMessage.warning("当前没有调试响应数据可供推导, 请先发送调试")
+        return
+    }
+    stepInferring.value = true
+    try {
+        // 优先使用后端透出的完整响应, 兼容回退解析 snippet
+        let responseData = stepTestResult.value.response_data || null
+        if (!responseData) {
+            try { responseData = JSON.parse(stepTestResult.value.response_snippet) } catch (e) { responseData = null }
+        }
+        if (!responseData) {
+            ElMessage.warning("调试响应不是合法 JSON, 无法推导契约")
+            return
+        }
+        const res = await axios.post("/api/tools/infer-schema", { sample_json: responseData, strict_mode: false })
+        const schemaObj = (res.data && res.data.schema) ? res.data.schema : res.data
+        activeStep.value.schema_text = JSON.stringify(schemaObj, null, 2)
+        stepActiveTab.value = "schema"
+        ElMessage.success("已从当前实际响应数据一键推导生成 Draft-7 Schema 契约！")
+    } catch (err) {
+        ElMessage.error("推导失败: " + (err.response?.data?.detail || err.message))
+    } finally {
+        stepInferring.value = false
+    }
+}
+
 // ================= 对话框开关 =================
 const resetScenarioForm = () => {
     let mId = machineList.value.length > 0 ? machineList.value[0].id : null
@@ -682,6 +772,7 @@ const openEditScenarioDialog = (row) => {
         auth_config: Object.assign({ token: "", username: "", password: "", header_key: "Authorization", header_value: "" }, s.auth_config || {}),
         pre_actions: Array.isArray(s.pre_actions) ? s.pre_actions : [],
         post_actions: Array.isArray(s.post_actions) ? s.post_actions : [],
+        schema_text: s.expected_schema ? JSON.stringify(s.expected_schema, null, 2) : "",
         is_cleanup: !!s.is_cleanup
     }))
     if (scenarioSteps.value.length === 0) {
@@ -811,6 +902,7 @@ export {
     addStepPreActionRow, removeStepPreActionRow, applyStepPreActionPreset,
     addStepPostActionRow, removeStepPostActionRow, onStepPostActionTypeChange, applyStepPostActionPreset,
     openCreateScenarioDialog, openEditScenarioDialog, submitScenarioForm, handleDeleteScenario,
+    stepSchemaSampleJson, stepInferring, formatStepSchemaJson, inferStepSchemaFromSample, inferStepSchemaFromTestResult,
     scenarioRunningId, scenarioResultVisible, scenarioResult, stepTestRunning, stepTestResult,
     handleRunScenario, getStepResultBadge, handleTestRunStep,
     apiImportDialogVisible, apiImportSearch, apiImportMethodFilter, apiImportSelection, apiImportTableRef,
