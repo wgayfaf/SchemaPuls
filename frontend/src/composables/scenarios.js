@@ -977,9 +977,7 @@ const openApiImportDialog = () => {
     apiImportMethodFilter.value = 'ALL'
     apiImportSelection.value = []
     apiImportDialogVisible.value = true
-    nextTick(() =>{
-        console.log('⚠️ 有人调用了 clearSelection！')
-        console.trace()
+    nextTick(() => {
         apiImportTableRef.value?.clearSelection()
     })
 }
@@ -999,6 +997,8 @@ const confirmImportApisAsSteps = () => {
     scenarioSteps.value.splice(insertAt, 0, ...steps)
     activeStepIndex.value = insertAt
     apiImportDialogVisible.value = false
+    apiImportSelection.value = []
+    apiImportTableRef.value?.clearSelection()
     const cleanupCount = steps.filter(s => s.is_cleanup).length
     ElMessage.success(`已导入 ${steps.length} 个接口为业务链路节点${cleanupCount ? ` (其中 ${cleanupCount} 个 DELETE 接口已自动标记为清理步骤)` : ''}`)
 }

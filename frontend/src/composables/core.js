@@ -221,7 +221,10 @@ const getStatusIcon = (status) => {
 };
 
 const fetchData = async (isManual = false) => {
-    loading.value = true;
+    // 首次全量拉取或用户手动点击刷新时才展示遮罩，后台每 15 秒静默轮询不打扰用户操作
+    if (isManual || (!targets.value.length && !apiList.value.length)) {
+        loading.value = true;
+    }
     try {
         const [targetsRes, summaryRes, groupsRes, envsRes, machinesRes, apisRes] = await Promise.all([
             axios.get("/api/targets"),

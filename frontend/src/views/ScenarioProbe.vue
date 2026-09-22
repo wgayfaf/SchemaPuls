@@ -1653,10 +1653,10 @@
                             </span>
                         </div>
 
-                        <el-table ref="apiImportTableRef" :data="importableApis" size="small" max-height="380"
+                        <el-table ref="apiImportTableRef" :data="importableApis" row-key="id" size="small" max-height="380"
                             @selection-change="handleApiImportSelectionChange"
                             empty-text="接口管理中暂无接口，请先在【接口管理】页面创建">
-                            <el-table-column type="selection" width="42"></el-table-column>
+                            <el-table-column type="selection" :reserve-selection="true" width="42"></el-table-column>
                             <el-table-column label="方法" width="80">
                                 <template #default="{ row }">
                                     <span style="font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; display: inline-block;"
