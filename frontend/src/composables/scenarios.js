@@ -15,7 +15,7 @@ import axios from 'axios'
 import * as echarts from 'echarts'
 import { machineList, environmentList, apiList } from './core'
 import { fetchMachineEnvironment, currentMachineEnvironment } from './machines'
-import { safeFormatJson } from './apis'
+import { safeFormatJson, formatIntervalDisplay } from './apis'
 
 // ================= 列表与筛选状态 =================
 const scenarioList = ref([])
@@ -524,6 +524,28 @@ const filteredScenarios = computed(() => {
         )
     }
     return list
+})
+
+// ================= 场景列表分页状态 =================
+const scenarioCurrentPage = ref(1)
+const scenarioPageSize = ref(10)
+
+const paginatedScenarios = computed(() => {
+    const start = (scenarioCurrentPage.value - 1) * scenarioPageSize.value
+    return filteredScenarios.value.slice(start, start + scenarioPageSize.value)
+})
+
+// 当筛选条件或搜索关键词变动时，重置分页至第 1 页
+watch([selectedScenarioEnv, selectedScenarioMachine, selectedScenarioStatus, scenarioSearchQuery], () => {
+    scenarioCurrentPage.value = 1
+})
+
+// 当过滤列表数量或单页条数变动导致当前页越界时，自动校准当前页
+watch([filteredScenarios, scenarioPageSize], () => {
+    const maxPage = Math.max(1, Math.ceil(filteredScenarios.value.length / scenarioPageSize.value))
+    if (scenarioCurrentPage.value > maxPage) {
+        scenarioCurrentPage.value = maxPage
+    }
 })
 
 // ================= 业务链路步骤折叠与展开状态 (解决多接口平铺变形) =================
@@ -1341,14 +1363,99 @@ const submitScenarioForm = async () => {
     }
 }
 
-// ================= 删除 =================
+// ================= 删除与批量操作 =================
 const handleDeleteScenario = async (row) => {
     try {
         await axios.delete(`/api/scenarios/${row.id}`)
         ElMessage.success(`场景 [${row.name}] 已删除`)
-        fetchScenarios()
+        selectedScenarioRows.value = selectedScenarioRows.value.filter(r => r.id !== row.id)
+        await fetchScenarios()
     } catch (err) {
         ElMessage.error('删除场景失败: ' + (err.response?.data?.detail || err.message))
+    }
+}
+
+// 批量操作状态
+const selectedScenarioRows = ref([])
+const scenarioTableRef = ref(null)
+const isScenarioBatchOperating = ref(false)
+
+const handleScenarioSelectionChange = (rows) => {
+    selectedScenarioRows.value = rows || []
+}
+
+const clearScenarioSelection = () => {
+    if (scenarioTableRef.value) {
+        scenarioTableRef.value.clearSelection()
+    }
+    selectedScenarioRows.value = []
+}
+
+// 批量删除场景
+const handleBatchDeleteScenarios = async () => {
+    if (!selectedScenarioRows.value.length) {
+        ElMessage.warning('请先勾选需要批量删除的场景！')
+        return
+    }
+    const count = selectedScenarioRows.value.length
+    const ids = selectedScenarioRows.value.map(r => r.id)
+    isScenarioBatchOperating.value = true
+    try {
+        const res = await axios.post('/api/scenarios/batch-delete', { ids })
+        ElMessage.success(res.data.message || `成功批量删除 ${count} 个拨测场景`)
+        clearScenarioSelection()
+        await fetchScenarios()
+    } catch (err) {
+        ElMessage.error('批量删除场景失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+        isScenarioBatchOperating.value = false
+    }
+}
+
+// 批量启用/关闭场景探测周期
+const handleBatchToggleScenarioActive = async (targetActiveState = false) => {
+    if (!selectedScenarioRows.value.length) {
+        ElMessage.warning(`请先勾选需要批量${targetActiveState ? '开启' : '关闭'}探测周期的场景！`)
+        return
+    }
+    const count = selectedScenarioRows.value.length
+    const ids = selectedScenarioRows.value.map(r => r.id)
+    isScenarioBatchOperating.value = true
+    try {
+        const res = await axios.post('/api/scenarios/batch-toggle-active', { ids, is_active: targetActiveState })
+        ElMessage.success(res.data.message || `成功批量${targetActiveState ? '开启' : '关闭'} ${count} 个场景的定时探测！`)
+        selectedScenarioRows.value.forEach(r => {
+            r.is_active = targetActiveState
+        })
+        clearScenarioSelection()
+        await fetchScenarios()
+    } catch (err) {
+        ElMessage.error(`批量${targetActiveState ? '开启' : '关闭'}失败: ` + (err.response?.data?.detail || err.message))
+    } finally {
+        isScenarioBatchOperating.value = false
+    }
+}
+
+// 批量修改场景探测周期
+const handleBatchSetScenarioInterval = async (intervalMinutes) => {
+    if (!selectedScenarioRows.value.length) {
+        ElMessage.warning('请先勾选需要批量设置探测周期的场景！')
+        return
+    }
+    const ids = selectedScenarioRows.value.map(r => r.id)
+    isScenarioBatchOperating.value = true
+    try {
+        const res = await axios.post('/api/scenarios/batch-set-interval', { ids, cron_interval_minutes: intervalMinutes })
+        ElMessage.success(res.data.message || `成功将 ${ids.length} 个场景的探测周期修改为 ${formatIntervalDisplay(intervalMinutes, true)}！`)
+        selectedScenarioRows.value.forEach(r => {
+            r.cron_interval_minutes = intervalMinutes
+        })
+        clearScenarioSelection()
+        await fetchScenarios()
+    } catch (err) {
+        ElMessage.error('批量设置场景探测周期失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+        isScenarioBatchOperating.value = false
     }
 }
 
@@ -1551,5 +1658,9 @@ export {
     stepResponseTab, stepExtractedVarNames, customExtractPath, customExtractVarName,
     customExtractPreview, stepExtractableFields, getStepResponseFormattedBody,
     isFieldExtractedInActiveStep, quickExtractFieldToScenarioVariable, addCustomExtractToScenarioVariable,
-    insertScenarioVarToStepBody, insertScenarioVarToStepParam, insertScenarioVarToStepHeader, insertScenarioVarToStepPath
+    insertScenarioVarToStepBody, insertScenarioVarToStepParam, insertScenarioVarToStepHeader, insertScenarioVarToStepPath,
+    selectedScenarioRows, scenarioTableRef, isScenarioBatchOperating,
+    handleScenarioSelectionChange, clearScenarioSelection,
+    handleBatchDeleteScenarios, handleBatchToggleScenarioActive, handleBatchSetScenarioInterval,
+    scenarioCurrentPage, scenarioPageSize, paginatedScenarios
 }

@@ -99,7 +99,71 @@
                             </div>
                         </div>
 
-                        <el-table :data="filteredApis" v-loading="loading" style="width: 100%">
+                        <!-- 批量操作工具栏 (选中项 >= 1 时显示) -->
+                        <transition name="el-fade-in">
+                            <div v-if="selectedApiRows.length > 0"
+                                style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.06);">
+                                <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #1e40af; font-weight: 600;">
+                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #2563eb; color: #ffffff; border-radius: 50%; font-size: 12px;">
+                                        <i class="fa-solid fa-check"></i>
+                                    </span>
+                                    <span>已勾选 <b style="color: #1d4ed8; font-size: 15px;">{{ selectedApiRows.length }}</b> 个接口</span>
+                                    <span style="font-size: 11.5px; color: #64748b; font-weight: normal;">(共 {{ filteredApis.length }} 个)</span>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <!-- 批量关闭探测周期 -->
+                                    <el-button size="small" type="warning" plain :loading="isBatchOperating" @click="handleBatchToggleActive(false)">
+                                        <i class="fa-solid fa-pause" style="margin-right: 4px;"></i>批量关闭探测周期
+                                    </el-button>
+
+                                    <!-- 批量开启探测周期 -->
+                                    <el-button size="small" type="success" plain :loading="isBatchOperating" @click="handleBatchToggleActive(true)">
+                                        <i class="fa-solid fa-play" style="margin-right: 4px;"></i>批量开启探测周期
+                                    </el-button>
+
+                                    <!-- 批量调整周期 -->
+                                    <el-dropdown trigger="click" @command="handleBatchSetInterval" :disabled="isBatchOperating">
+                                        <el-button size="small" type="info" plain>
+                                            <i class="fa-solid fa-clock" style="margin-right: 4px;"></i>批量修改周期
+                                            <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                        </el-button>
+                                        <template #dropdown>
+                                            <el-dropdown-menu>
+                                                <div style="padding: 5px 12px; font-size: 11px; font-weight: 700; color: #475569; background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+                                                    设置所选接口的探测执行间隔:
+                                                </div>
+                                                <el-dropdown-item :command="1">1 分钟 (高频验证)</el-dropdown-item>
+                                                <el-dropdown-item :command="5">5 分钟 (生产标准)</el-dropdown-item>
+                                                <el-dropdown-item :command="15">15 分钟</el-dropdown-item>
+                                                <el-dropdown-item :command="30">30 分钟</el-dropdown-item>
+                                                <el-dropdown-item :command="60">1 小时</el-dropdown-item>
+                                                <el-dropdown-item :command="1440">1 天</el-dropdown-item>
+                                            </el-dropdown-menu>
+                                        </template>
+                                    </el-dropdown>
+
+                                    <!-- 批量删除 -->
+                                    <el-popconfirm :title="'确定要批量删除已选中的 ' + selectedApiRows.length + ' 个接口及其历史时序流水吗？此操作不可逆！'"
+                                        confirm-button-text="确定删除" cancel-button-text="取消" confirm-button-type="danger"
+                                        @confirm="handleBatchDeleteApis">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" :loading="isBatchOperating">
+                                                <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>批量删除 ({{ selectedApiRows.length }})
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+
+                                    <!-- 清除勾选 -->
+                                    <el-button size="small" text @click="clearApiSelection" style="color: #64748b;">
+                                        取消选择
+                                    </el-button>
+                                </div>
+                            </div>
+                        </transition>
+
+                        <el-table ref="apiTableRef" :data="paginatedApis" row-key="id" v-loading="loading" @selection-change="handleApiSelectionChange" style="width: 100%">
+                            <el-table-column type="selection" :reserve-selection="true" width="45" align="center"></el-table-column>
                             <el-table-column prop="id" label="ID" width="50" align="center"></el-table-column>
                             <el-table-column label="接口名称" min-width="150">
                                 <template #default="{ row }">
@@ -215,6 +279,45 @@
                                 </template>
                             </el-table-column>
                         </el-table>
+
+                        <!-- 表格底部选择与分页状态栏 -->
+                        <div v-if="filteredApis.length > 0"
+                            style="margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; padding-top: 12px; border-top: 1px solid #f1f5f9; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div v-if="selectedApiRows.length > 0" style="color: #2563eb; font-weight: 600;">
+                                    <i class="fa-solid fa-check-double" style="margin-right: 4px;"></i>已选择 {{ selectedApiRows.length }} 项 (共 {{ filteredApis.length }} 项)
+                                </div>
+                                <div v-else>
+                                    共 {{ filteredApis.length }} 个接口，勾选左侧复选框可开启批量操作
+                                </div>
+
+                                <div v-if="selectedApiRows.length > 0" style="display: flex; gap: 8px;">
+                                    <el-button size="small" link type="warning" @click="handleBatchToggleActive(false)">
+                                        批量关闭探测
+                                    </el-button>
+                                    <el-button size="small" link type="success" @click="handleBatchToggleActive(true)">
+                                        批量开启探测
+                                    </el-button>
+                                    <el-button size="small" link type="danger" @click="handleBatchDeleteApis">
+                                        批量删除
+                                    </el-button>
+                                    <el-button size="small" link @click="clearApiSelection" style="color: #64748b;">
+                                        取消选择
+                                    </el-button>
+                                </div>
+                            </div>
+
+                            <!-- 分页控制器 -->
+                            <el-pagination
+                                v-model:current-page="apiCurrentPage"
+                                v-model:page-size="apiPageSize"
+                                :page-sizes="[10, 20, 50, 100]"
+                                :total="filteredApis.length"
+                                layout="total, sizes, prev, pager, next, jumper"
+                                size="small"
+                                background
+                            />
+                        </div>
                     </div>
                 </div>
 

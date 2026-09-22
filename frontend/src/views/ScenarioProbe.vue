@@ -72,8 +72,72 @@
                             </div>
                         </div>
 
-                        <el-table :data="filteredScenarios" v-loading="scenarioLoading" style="width: 100%"
+                        <!-- 批量操作工具栏 (选中项 >= 1 时显示) -->
+                        <transition name="el-fade-in">
+                            <div v-if="selectedScenarioRows.length > 0"
+                                style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.06);">
+                                <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: #1e40af; font-weight: 600;">
+                                    <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #2563eb; color: #ffffff; border-radius: 50%; font-size: 12px;">
+                                        <i class="fa-solid fa-check"></i>
+                                    </span>
+                                    <span>已勾选 <b style="color: #1d4ed8; font-size: 15px;">{{ selectedScenarioRows.length }}</b> 个场景</span>
+                                    <span style="font-size: 11.5px; color: #64748b; font-weight: normal;">(共 {{ filteredScenarios.length }} 个)</span>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <!-- 批量关闭探测周期 -->
+                                    <el-button size="small" type="warning" plain :loading="isScenarioBatchOperating" @click="handleBatchToggleScenarioActive(false)">
+                                        <i class="fa-solid fa-pause" style="margin-right: 4px;"></i>批量关闭探测周期
+                                    </el-button>
+
+                                    <!-- 批量开启探测周期 -->
+                                    <el-button size="small" type="success" plain :loading="isScenarioBatchOperating" @click="handleBatchToggleScenarioActive(true)">
+                                        <i class="fa-solid fa-play" style="margin-right: 4px;"></i>批量开启探测周期
+                                    </el-button>
+
+                                    <!-- 批量调整周期 -->
+                                    <el-dropdown trigger="click" @command="handleBatchSetScenarioInterval" :disabled="isScenarioBatchOperating">
+                                        <el-button size="small" type="info" plain>
+                                            <i class="fa-solid fa-clock" style="margin-right: 4px;"></i>批量修改周期
+                                            <i class="fa-solid fa-angle-down" style="margin-left: 4px; font-size: 10px;"></i>
+                                        </el-button>
+                                        <template #dropdown>
+                                            <el-dropdown-menu>
+                                                <div style="padding: 5px 12px; font-size: 11px; font-weight: 700; color: #475569; background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
+                                                    设置所选场景的拨测执行间隔:
+                                                </div>
+                                                <el-dropdown-item :command="1">1 分钟 (高频验证)</el-dropdown-item>
+                                                <el-dropdown-item :command="5">5 分钟 (生产标准)</el-dropdown-item>
+                                                <el-dropdown-item :command="15">15 分钟</el-dropdown-item>
+                                                <el-dropdown-item :command="30">30 分钟</el-dropdown-item>
+                                                <el-dropdown-item :command="60">1 小时</el-dropdown-item>
+                                                <el-dropdown-item :command="1440">1 天</el-dropdown-item>
+                                            </el-dropdown-menu>
+                                        </template>
+                                    </el-dropdown>
+
+                                    <!-- 批量删除 -->
+                                    <el-popconfirm :title="'确定要批量删除已选中的 ' + selectedScenarioRows.length + ' 个场景及其历史时序流水吗？此操作不可逆！'"
+                                        confirm-button-text="确定删除" cancel-button-text="取消" confirm-button-type="danger"
+                                        @confirm="handleBatchDeleteScenarios">
+                                        <template #reference>
+                                            <el-button size="small" type="danger" :loading="isScenarioBatchOperating">
+                                                <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>批量删除 ({{ selectedScenarioRows.length }})
+                                            </el-button>
+                                        </template>
+                                    </el-popconfirm>
+
+                                    <!-- 清除勾选 -->
+                                    <el-button size="small" text @click="clearScenarioSelection" style="color: #64748b;">
+                                        取消选择
+                                    </el-button>
+                                </div>
+                            </div>
+                        </transition>
+
+                        <el-table ref="scenarioTableRef" :data="paginatedScenarios" row-key="id" v-loading="scenarioLoading" @selection-change="handleScenarioSelectionChange" style="width: 100%"
                             empty-text="暂无拨测场景，可点击右上角【新建场景】创建业务链路">
+                            <el-table-column type="selection" :reserve-selection="true" width="45" align="center" />
                             <el-table-column prop="id" label="ID" width="50" align="center"></el-table-column>
                             <el-table-column label="场景名称" min-width="160">
                                 <template #default="{ row }">
@@ -132,7 +196,7 @@
                                                             <span style="margin-left: 6px;">耗时: {{ row.last_steps_detail[idx].latency_ms || 0 }}ms</span>
                                                         </div>
                                                         <div style="font-size: 11px; margin-top: 2px;">
-                                                            契约校验: 
+                                                            契约校验:
                                                             <span v-if="(row.last_steps_detail[idx].schema_configured)">
                                                                 <span v-if="row.last_steps_detail[idx].schema_matched === true" style="color: #4ade80; font-weight: 600;">一致 (通过)</span>
                                                                 <span v-else style="color: #f87171; font-weight: 600;">突变 ({{ (row.last_steps_detail[idx].schema_errors || []).map(e => e.message).join('; ') || '不匹配' }})</span>
@@ -321,6 +385,45 @@
                                 </template>
                             </el-table-column>
                         </el-table>
+
+                        <!-- 表格底部选择与分页状态栏 -->
+                        <div v-if="filteredScenarios.length > 0"
+                            style="margin-top: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #64748b; padding-top: 12px; border-top: 1px solid #f1f5f9; flex-wrap: wrap; gap: 12px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <div v-if="selectedScenarioRows.length > 0" style="color: #2563eb; font-weight: 600;">
+                                    <i class="fa-solid fa-check-double" style="margin-right: 4px;"></i>已选择 {{ selectedScenarioRows.length }} 项 (共 {{ filteredScenarios.length }} 项)
+                                </div>
+                                <div v-else>
+                                    共 {{ filteredScenarios.length }} 个场景，勾选左侧复选框可开启批量操作
+                                </div>
+
+                                <div v-if="selectedScenarioRows.length > 0" style="display: flex; gap: 8px;">
+                                    <el-button size="small" link type="warning" @click="handleBatchToggleScenarioActive(false)">
+                                        批量关闭探测
+                                    </el-button>
+                                    <el-button size="small" link type="success" @click="handleBatchToggleScenarioActive(true)">
+                                        批量开启探测
+                                    </el-button>
+                                    <el-button size="small" link type="danger" @click="handleBatchDeleteScenarios">
+                                        批量删除
+                                    </el-button>
+                                    <el-button size="small" link @click="clearScenarioSelection" style="color: #64748b;">
+                                        取消选择
+                                    </el-button>
+                                </div>
+                            </div>
+
+                            <!-- 分页控制器 -->
+                            <el-pagination
+                                v-model:current-page="scenarioCurrentPage"
+                                v-model:page-size="scenarioPageSize"
+                                :page-sizes="[10, 20, 50, 100]"
+                                :total="filteredScenarios.length"
+                                layout="total, sizes, prev, pager, next, jumper"
+                                size="small"
+                                background
+                            />
+                        </div>
                     </div>
 
                     <!-- ================= 新建/编辑场景对话框 (原接口探测工作台界面 + 业务链路步骤节点流) ================= -->
@@ -466,9 +569,67 @@
                                         <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
                                             <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" :style="getMethodBadgeStyle(step.http_method)">{{ step.http_method }}</span>
                                         </div>
-                                        <div style="font-size: 11.5px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+<!--                                        <div style="font-size: 11.5px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-->
+<!--                                            {{ step.name || '未命名节点' }}-->
+<!--                                        </div>-->
+
+                                        <div
+                                            v-if="editingStepIndex !== idx"
+                                            style="display: flex; align-items: center; gap: 4px;"
+                                        >
+                                          <div
+                                              @dblclick="startEditStep(idx)"
+                                              style="
+                                              font-size: 11.5px;
+                                              font-weight: 600;
+                                              color: #0f172a;
+                                              white-space: nowrap;
+                                              overflow: hidden;
+                                              text-overflow: ellipsis;
+                                              flex: 1;
+                                              min-width: 0;"
+                                          >
                                             {{ step.name || '未命名节点' }}
+                                          </div>
+                                          <i
+                                              class="fa-solid fa-pen-to-square"
+                                              @click.stop="startEditStep(idx)"
+                                              title="编辑节点名称"
+                                              style="
+                                              font-size: 10px;
+                                              color: #94a3b8;
+                                              cursor: pointer;
+                                              flex-shrink: 0;
+                                              opacity: 0.6;
+                                              transition: opacity 0.15s, color 0.15s;"
+                                              @mouseenter="e => { e.target.style.opacity = '1'; e.target.style.color = '#f97316' }"
+                                              @mouseleave="e => { e.target.style.opacity = '0.6'; e.target.style.color = '#94a3b8' }"
+                                          ></i>
                                         </div>
+
+                                        <input
+                                            v-else
+                                            :ref="el => { if (el) stepNameInputRefs[idx] = el }"
+                                            v-model="step.name"
+                                            @blur="finishEditStep"
+                                            @keyup.enter="finishEditStep"
+                                            @keyup.esc="cancelEditStep(idx)"
+                                            style="
+                                            font-size: 11.5px;
+                                            font-weight: 600;
+                                            color: #0f172a;
+                                            width: 100%;
+                                            padding: 0;
+                                            margin: 0;
+                                            border: none;
+                                            border-bottom: 1px solid #f97316;
+                                            background: transparent;
+                                            outline: none;
+                                            font-family: inherit;
+                                            line-height: 1.4;
+                                            box-sizing: border-box;
+                                          " />
+
                                         <div style="font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                                             {{ step.http_path || '/' }}
                                         </div>
@@ -1900,7 +2061,7 @@
 </template>
 
 <script>
-import { inject } from 'vue'
+import { inject, ref, nextTick } from 'vue'
 
 // 场景拨测视图: 业务链路多步骤拨测 (写入 -> 校验 -> 清理 闭环)
 // 对话框复用【接口探测工作台】的 Postman 风格配置界面, 数据源为当前选中的业务链路节点
@@ -1909,7 +2070,39 @@ export default {
     name: 'ScenarioProbeView',
     setup() {
         const wb = inject('workbench')
+      // ===== 节点名称就地编辑 =====
+        const editingStepIndex = ref(-1)        // 当前正在编辑的节点索引，-1 表示无
+        const stepNameInputRefs = ref({})       // 存放各节点 input 的 DOM 引用
+        let originalStepName = ''
+
+        function startEditStep(idx) {
+          originalStepName = wb.scenarioSteps.value[idx]?.name || ''
+          editingStepIndex.value = idx
+          nextTick(() => {
+            const el = stepNameInputRefs.value[idx]
+            if (el) {
+              el.focus()
+              el.select()
+            }
+          })
+        }
+
+        function finishEditStep() {
+          editingStepIndex.value = -1
+        }
+
+        function cancelEditStep(idx) {
+          const step = wb.scenarioSteps.value[idx]
+          if (step) step.name = originalStepName
+          editingStepIndex.value = -1
+        }
         return {
+            // ===== 节点名称就地编辑 =====
+            editingStepIndex,
+            stepNameInputRefs,
+            startEditStep,
+            finishEditStep,
+            cancelEditStep,
             // 共享导航与机器环境上下文
             currentNav: wb.currentNav,
             environmentList: wb.environmentList,
@@ -2037,7 +2230,20 @@ export default {
             insertScenarioVarToStepBody: wb.insertScenarioVarToStepBody,
             insertScenarioVarToStepParam: wb.insertScenarioVarToStepParam,
             insertScenarioVarToStepHeader: wb.insertScenarioVarToStepHeader,
-            insertScenarioVarToStepPath: wb.insertScenarioVarToStepPath
+            insertScenarioVarToStepPath: wb.insertScenarioVarToStepPath,
+            // 场景列表批量操作
+            selectedScenarioRows: wb.selectedScenarioRows,
+            scenarioTableRef: wb.scenarioTableRef,
+            isScenarioBatchOperating: wb.isScenarioBatchOperating,
+            handleScenarioSelectionChange: wb.handleScenarioSelectionChange,
+            clearScenarioSelection: wb.clearScenarioSelection,
+            handleBatchDeleteScenarios: wb.handleBatchDeleteScenarios,
+            handleBatchToggleScenarioActive: wb.handleBatchToggleScenarioActive,
+            handleBatchSetScenarioInterval: wb.handleBatchSetScenarioInterval,
+            // 场景列表分页
+            scenarioCurrentPage: wb.scenarioCurrentPage,
+            scenarioPageSize: wb.scenarioPageSize,
+            paginatedScenarios: wb.paginatedScenarios
         }
     }
 }

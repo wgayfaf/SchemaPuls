@@ -205,6 +205,28 @@ const filteredApis = computed(() => {
     return list;
 });
 
+// ================= 接口列表分页状态 =================
+const apiCurrentPage = ref(1);
+const apiPageSize = ref(10);
+
+const paginatedApis = computed(() => {
+    const start = (apiCurrentPage.value - 1) * apiPageSize.value;
+    return filteredApis.value.slice(start, start + apiPageSize.value);
+});
+
+// 当筛选条件或搜索关键词变动时，重置分页至第 1 页
+watch([selectedApiEnv, selectedApiMachine, selectedApiStatus, apiSearchQuery], () => {
+    apiCurrentPage.value = 1;
+});
+
+// 当过滤列表数量或单页条数变动导致当前页越界时，自动校准当前页
+watch([filteredApis, apiPageSize], () => {
+    const maxPage = Math.max(1, Math.ceil(filteredApis.value.length / apiPageSize.value));
+    if (apiCurrentPage.value > maxPage) {
+        apiCurrentPage.value = maxPage;
+    }
+});
+
 // 监听机器选择变动，自动同步更新 Base URL 与该机器归属的环境及变量池
 watch(() => apiForm.value.machine_id, (newMId) => {
     if (!newMId) return;
@@ -1154,6 +1176,90 @@ const handleDeleteApi = async (apiId, apiName) => {
     }
 };
 
+// ================= 批量操作状态与方法 =================
+const selectedApiRows = ref([]);
+const apiTableRef = ref(null);
+const isBatchOperating = ref(false);
+
+const handleApiSelectionChange = (rows) => {
+    selectedApiRows.value = rows || [];
+};
+
+const clearApiSelection = () => {
+    if (apiTableRef.value) {
+        apiTableRef.value.clearSelection();
+    }
+    selectedApiRows.value = [];
+};
+
+// 批量删除接口
+const handleBatchDeleteApis = async () => {
+    if (!selectedApiRows.value.length) {
+        ElMessage.warning("请先勾选需要批量删除的接口！");
+        return;
+    }
+    const count = selectedApiRows.value.length;
+    const ids = selectedApiRows.value.map(r => r.id);
+    isBatchOperating.value = true;
+    try {
+        const res = await axios.post('/api/apis/batch-delete', { ids });
+        ElMessage.success(res.data.message || `成功批量删除 ${count} 个接口探针`);
+        clearApiSelection();
+        await fetchData();
+    } catch (err) {
+        ElMessage.error("批量删除失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+        isBatchOperating.value = false;
+    }
+};
+
+// 批量启用/关闭探测周期
+const handleBatchToggleActive = async (targetActiveState = false) => {
+    if (!selectedApiRows.value.length) {
+        ElMessage.warning(`请先勾选需要批量${targetActiveState ? '开启' : '关闭'}探测周期的接口！`);
+        return;
+    }
+    const count = selectedApiRows.value.length;
+    const ids = selectedApiRows.value.map(r => r.id);
+    isBatchOperating.value = true;
+    try {
+        const res = await axios.post('/api/apis/batch-toggle-active', { ids, is_active: targetActiveState });
+        ElMessage.success(res.data.message || `成功批量${targetActiveState ? '开启' : '关闭'} ${count} 个接口的定时探测！`);
+        selectedApiRows.value.forEach(r => {
+            r.is_active = targetActiveState;
+        });
+        clearApiSelection();
+        await fetchData();
+    } catch (err) {
+        ElMessage.error(`批量${targetActiveState ? '开启' : '关闭'}失败: ` + (err.response?.data?.detail || err.message));
+    } finally {
+        isBatchOperating.value = false;
+    }
+};
+
+// 批量修改探测周期
+const handleBatchSetInterval = async (intervalMinutes) => {
+    if (!selectedApiRows.value.length) {
+        ElMessage.warning("请先勾选需要批量设置探测周期的接口！");
+        return;
+    }
+    const ids = selectedApiRows.value.map(r => r.id);
+    isBatchOperating.value = true;
+    try {
+        const res = await axios.post('/api/apis/batch-set-interval', { ids, cron_interval_minutes: intervalMinutes });
+        ElMessage.success(res.data.message || `成功将 ${ids.length} 个接口的探测周期修改为 ${formatIntervalDisplay(intervalMinutes, true)}！`);
+        selectedApiRows.value.forEach(r => {
+            r.cron_interval_minutes = intervalMinutes;
+        });
+        clearApiSelection();
+        await fetchData();
+    } catch (err) {
+        ElMessage.error("批量设置探测周期失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+        isBatchOperating.value = false;
+    }
+};
+
 const handleTriggerApi = async (row) => {
     triggeringApiId.value = row.id;
     try {
@@ -1244,4 +1350,4 @@ const openApiMetricsDrawer = async (row) => {
     }
 };
 
-export { activeDefaultHeadersCount, addHeaderRow, addParamRow, addPostActionRow, addPreActionRow, apiActiveTab, apiAuthConfig, apiAuthType, apiBodyText, apiBodyType, apiDialogVisible, apiEnvAvgLatency, apiEnvHealthyCount, apiEnvIssueCount, apiEnvOnlineMachineCount, apiEnvTotalCount, apiForm, apiHeadersList, apiInferring, apiIntervalUnit, apiIntervalValue, apiParamsList, apiPostActionsList, apiPreActionsList, apiResponseTab, apiSampleJson, apiSearchQuery, apiSubmitting, apiTestResult, apiTestRunning, applyPostActionPreset, applyPreActionPreset, avgApiLatency, clearBodyJson, copyResponseBody, copyText, createDefaultHeaders, currentEnvApisForKpi, currentEnvMachineOptions, editingApiId, filteredApis, formatBodyJson, formatIfJson, formatIntervalDisplay, formatSampleJson, formatSchemaJson, getEffectiveHeaders, getIntervalTooltip, handleDeleteApi, handleInferApiSchema, handleTestRunApi, handleTriggerApi, healthyApiCount, inferSchemaFromTestResult, insertMacroToBody, isHeaderOverridden, isSyncingUrlParams, issueApiCount, minifyBodyJson, onPostActionTypeChange, openApiMetricsDrawer, openCreateApiDialog, openEditApiDialog, removeHeaderRow, removeParamRow, removePostActionRow, removePreActionRow, safeFormatJson, safeMinifyJson, selectedApiEnv, selectedApiMachine, selectedApiStatus, setQuickInterval, showDefaultHeaders, submitApiForm, syncParamsToPath, syncPathToParams, systemDefaultHeaders, toggleApiActive, triggeringApiId }
+export { activeDefaultHeadersCount, addHeaderRow, addParamRow, addPostActionRow, addPreActionRow, apiActiveTab, apiAuthConfig, apiAuthType, apiBodyText, apiBodyType, apiDialogVisible, apiEnvAvgLatency, apiEnvHealthyCount, apiEnvIssueCount, apiEnvOnlineMachineCount, apiEnvTotalCount, apiForm, apiHeadersList, apiInferring, apiIntervalUnit, apiIntervalValue, apiParamsList, apiPostActionsList, apiPreActionsList, apiResponseTab, apiSampleJson, apiSearchQuery, apiSubmitting, apiTestResult, apiTestRunning, applyPostActionPreset, applyPreActionPreset, avgApiLatency, clearBodyJson, copyResponseBody, copyText, createDefaultHeaders, currentEnvApisForKpi, currentEnvMachineOptions, editingApiId, filteredApis, formatBodyJson, formatIfJson, formatIntervalDisplay, formatSampleJson, formatSchemaJson, getEffectiveHeaders, getIntervalTooltip, handleDeleteApi, handleInferApiSchema, handleTestRunApi, handleTriggerApi, healthyApiCount, inferSchemaFromTestResult, insertMacroToBody, isHeaderOverridden, isSyncingUrlParams, issueApiCount, minifyBodyJson, onPostActionTypeChange, openApiMetricsDrawer, openCreateApiDialog, openEditApiDialog, removeHeaderRow, removeParamRow, removePostActionRow, removePreActionRow, safeFormatJson, safeMinifyJson, selectedApiEnv, selectedApiMachine, selectedApiStatus, setQuickInterval, showDefaultHeaders, submitApiForm, syncParamsToPath, syncPathToParams, systemDefaultHeaders, toggleApiActive, triggeringApiId, selectedApiRows, apiTableRef, isBatchOperating, handleApiSelectionChange, clearApiSelection, handleBatchDeleteApis, handleBatchToggleActive, handleBatchSetInterval, apiCurrentPage, apiPageSize, paginatedApis }

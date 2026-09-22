@@ -7,10 +7,14 @@ from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
+from sqlalchemy import text
 
 from app.database import get_session
 from app.models import Environment, ServiceGroup, MachineNode, ScenarioProbe, ScenarioProbeHistory
-from app.schemas.scenario import ScenarioPayload, ScenarioStepTestPayload
+from app.schemas.scenario import (
+    ScenarioPayload, ScenarioStepTestPayload,
+    BatchScenarioIdsPayload, BatchScenarioToggleActivePayload, BatchScenarioSetIntervalPayload
+)
 from app.services.scheduler import add_scenario_job, remove_scenario_job
 from app.services.scenario_service import (
     execute_scenario_probe,
@@ -144,6 +148,7 @@ def delete_scenario(id: int, session: Session = Depends(get_session)):
     scenario = session.get(ScenarioProbe, id)
     if not scenario:
         raise HTTPException(status_code=404, detail="ScenarioProbe not found")
+    session.exec(text(f"DELETE FROM scenario_probe_histories WHERE scenario_id = {id}"))
     session.delete(scenario)
     session.commit()
     remove_scenario_job(id)
@@ -162,6 +167,81 @@ def toggle_scenario_active(id: int, session: Session = Depends(get_session)):
     session.refresh(scenario)
     add_scenario_job(scenario)
     return _serialize(scenario, session)
+
+
+@router.post("/batch-delete")
+def batch_delete_scenarios(data: BatchScenarioIdsPayload, session: Session = Depends(get_session)):
+    """批量删除选中的场景拨测"""
+    if not data.ids:
+        return {"status": "ok", "deleted_count": 0, "message": "未传入任何场景ID"}
+
+    deleted_count = 0
+    for scenario_id in data.ids:
+        scenario = session.get(ScenarioProbe, scenario_id)
+        if not scenario:
+            continue
+        remove_scenario_job(scenario_id)
+        session.exec(text(f"DELETE FROM scenario_probe_histories WHERE scenario_id = {scenario_id}"))
+        session.delete(scenario)
+        deleted_count += 1
+
+    session.commit()
+    return {"status": "ok", "deleted_count": deleted_count, "message": f"成功批量删除 {deleted_count} 个场景拨测"}
+
+
+@router.post("/batch-toggle-active")
+def batch_toggle_scenario_active(data: BatchScenarioToggleActivePayload, session: Session = Depends(get_session)):
+    """批量启用/关闭选中的场景拨测的自动定时调度周期"""
+    if not data.ids:
+        return {"status": "ok", "updated_count": 0, "message": "未传入任何场景ID"}
+
+    updated_count = 0
+    for scenario_id in data.ids:
+        scenario = session.get(ScenarioProbe, scenario_id)
+        if not scenario:
+            continue
+        if data.is_active is not None:
+            scenario.is_active = data.is_active
+        else:
+            scenario.is_active = not scenario.is_active
+        session.add(scenario)
+        add_scenario_job(scenario)
+        updated_count += 1
+
+    session.commit()
+    return {
+        "status": "ok",
+        "updated_count": updated_count,
+        "is_active": data.is_active,
+        "message": f"成功批量更新 {updated_count} 个场景拨测的定时调度状态"
+    }
+
+
+@router.post("/batch-set-interval")
+def batch_set_scenario_interval(data: BatchScenarioSetIntervalPayload, session: Session = Depends(get_session)):
+    """批量修改选中的场景拨测的定时调度周期 (分钟)"""
+    if not data.ids:
+        return {"status": "ok", "updated_count": 0, "message": "未传入任何场景ID"}
+
+    interval = max(1, min(data.cron_interval_minutes, 10080))
+    updated_count = 0
+    for scenario_id in data.ids:
+        scenario = session.get(ScenarioProbe, scenario_id)
+        if not scenario:
+            continue
+        scenario.cron_interval_minutes = interval
+        session.add(scenario)
+        if scenario.is_active:
+            add_scenario_job(scenario)
+        updated_count += 1
+
+    session.commit()
+    return {
+        "status": "ok",
+        "updated_count": updated_count,
+        "cron_interval_minutes": interval,
+        "message": f"成功将 {updated_count} 个场景拨测的调度周期修改为 {interval} 分钟"
+    }
 
 
 # ==========================================================

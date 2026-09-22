@@ -33,3 +33,20 @@ class ScenarioStepTestPayload(BaseModel):
     base_url: Optional[str] = None
     step: Dict[str, Any] = {}
     scenario_variables: Dict[str, Any] = {} # 场景专属变量上下文 (调试时注入)
+
+
+class BatchScenarioIdsPayload(BaseModel):
+    """批量场景操作载荷 (批量删除等)"""
+    ids: List[int]
+
+
+class BatchScenarioToggleActivePayload(BaseModel):
+    """批量切换/启用/关闭场景定时调度周期载荷"""
+    ids: List[int]
+    is_active: Optional[bool] = None  # None: 取反切换; True: 批量开启; False: 批量关闭
+
+
+class BatchScenarioSetIntervalPayload(BaseModel):
+    """批量设置场景定时调度周期载荷"""
+    ids: List[int]
+    cron_interval_minutes: int

@@ -41,3 +41,21 @@ class ApiTestRunPayload(BaseModel):
     expected_schema: Optional[Dict[str, Any]] = None
     pre_actions: Optional[List[Dict[str, Any]]] = []
     post_actions: Optional[List[Dict[str, Any]]] = []
+
+
+class BatchApiIdsPayload(BaseModel):
+    """批量接口操作载荷 (批量删除等)"""
+    ids: List[int]
+
+
+class BatchToggleActivePayload(BaseModel):
+    """批量切换/启用/关闭接口探针探测周期载荷"""
+    ids: List[int]
+    is_active: Optional[bool] = None  # None: 取反切换; True: 批量开启; False: 批量关闭
+
+
+class BatchSetIntervalPayload(BaseModel):
+    """批量设置接口探针探测周期载荷"""
+    ids: List[int]
+    cron_interval_minutes: int
+

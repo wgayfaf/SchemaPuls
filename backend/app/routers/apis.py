@@ -10,7 +10,10 @@ from app.models import (
     Environment, ServiceGroup, MachineNode, ApiProbe,
     ApiProbeHistory, MonitorTarget,
 )
-from app.schemas.api_probe import ApiPayload, ApiTestRunPayload
+from app.schemas.api_probe import (
+    ApiPayload, ApiTestRunPayload,
+    BatchApiIdsPayload, BatchToggleActivePayload, BatchSetIntervalPayload
+)
 from app.services.probe_service import execute_api_probe, check_schema
 from app.services.scheduler import add_api_job, remove_api_job, add_target_job, remove_target_job
 
@@ -475,6 +478,102 @@ def delete_api(id: int, session: Session = Depends(get_session)):
     session.delete(api)
     session.commit()
     return {"status": "ok", "message": f"接口探针 id={id} 已删除"}
+
+
+@router.post("/batch-delete")
+def batch_delete_apis(data: BatchApiIdsPayload, session: Session = Depends(get_session)):
+    """批量删除选中的接口探针"""
+    if not data.ids:
+        return {"status": "ok", "deleted_count": 0, "message": "未传入任何接口ID"}
+
+    deleted_count = 0
+    for api_id in data.ids:
+        api = session.get(ApiProbe, api_id)
+        if not api:
+            continue
+        name = api.name
+        remove_api_job(api_id)
+        session.exec(text(f"DELETE FROM api_probe_histories WHERE api_probe_id = {api_id}"))
+        targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == name)).all()
+        for t in targets:
+            remove_target_job(t.id)
+            session.exec(text(f"DELETE FROM probe_histories WHERE target_id = {t.id}"))
+            session.delete(t)
+        session.delete(api)
+        deleted_count += 1
+
+    session.commit()
+    return {"status": "ok", "deleted_count": deleted_count, "message": f"成功批量删除 {deleted_count} 个接口探针"}
+
+
+@router.post("/batch-toggle-active")
+def batch_toggle_api_active(data: BatchToggleActivePayload, session: Session = Depends(get_session)):
+    """批量启用/关闭选中的接口探针的自动探测周期"""
+    if not data.ids:
+        return {"status": "ok", "updated_count": 0, "message": "未传入任何接口ID"}
+
+    updated_count = 0
+    for api_id in data.ids:
+        api = session.get(ApiProbe, api_id)
+        if not api:
+            continue
+        if data.is_active is not None:
+            api.is_active = data.is_active
+        else:
+            api.is_active = not api.is_active
+        session.add(api)
+        add_api_job(api)
+
+        # 同步对应的兼容 MonitorTarget
+        targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == api.name)).all()
+        for t in targets:
+            t.is_active = api.is_active
+            session.add(t)
+            add_target_job(t)
+        updated_count += 1
+
+    session.commit()
+    return {
+        "status": "ok",
+        "updated_count": updated_count,
+        "is_active": data.is_active,
+        "message": f"成功批量更新 {updated_count} 个接口探针的探测状态"
+    }
+
+
+@router.post("/batch-set-interval")
+def batch_set_api_interval(data: BatchSetIntervalPayload, session: Session = Depends(get_session)):
+    """批量修改选中的接口探针的探测周期 (分钟)"""
+    if not data.ids:
+        return {"status": "ok", "updated_count": 0, "message": "未传入任何接口ID"}
+
+    interval = max(1, min(data.cron_interval_minutes, 10080))
+    updated_count = 0
+    for api_id in data.ids:
+        api = session.get(ApiProbe, api_id)
+        if not api:
+            continue
+        api.cron_interval_minutes = interval
+        session.add(api)
+        if api.is_active:
+            add_api_job(api)
+
+        # 同步对应的兼容 MonitorTarget
+        targets = session.exec(select(MonitorTarget).where(MonitorTarget.name == api.name)).all()
+        for t in targets:
+            t.cron_interval_minutes = interval
+            session.add(t)
+            if t.is_active:
+                add_target_job(t)
+        updated_count += 1
+
+    session.commit()
+    return {
+        "status": "ok",
+        "updated_count": updated_count,
+        "cron_interval_minutes": interval,
+        "message": f"成功将 {updated_count} 个接口探针的探测周期修改为 {interval} 分钟"
+    }
 
 
 @router.post("/{id}/trigger")
