@@ -1109,46 +1109,6 @@
                                     </div>
                                 </el-tab-pane>
 
-                                <!-- 6. Schema 契约标签页 -->
-                                <el-tab-pane label="Schema" name="schema">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-                                        <span style="font-size: 12px; color: #64748b;">
-                                            标准的 JSON Schema 规范 (Draft-7)，拨测时将自动验证该节点真实响应是否破坏此契约
-                                        </span>
-                                        <div style="display: flex; gap: 8px;">
-                                            <el-button size="small" type="primary" plain @click="formatStepSchemaJson">
-                                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>格式化 Schema
-                                            </el-button>
-                                            <el-button size="small" type="primary" plain @click="inferStepSchemaFromTestResult"
-                                                :disabled="!stepTestResult || !stepTestResult.response_data">
-                                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从当前响应推导
-                                            </el-button>
-                                        </div>
-                                    </div>
-                                    <div class="pm-code-box">
-                                        <el-input v-model="activeStep.schema_text" type="textarea" :rows="8"
-                                            placeholder="默认留空（不强校验 Schema）。可先发送调试请求后，点击【从当前响应推导】一键自动填入 Draft-7 契约规则"></el-input>
-                                    </div>
-
-                                    <!-- 备选手动推导折叠卡片 -->
-                                    <div style="margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
-                                        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                                            <span><i class="fa-solid fa-code" style="margin-right: 4px; color: #64748b;"></i>从自定义 JSON 样本辅助推导</span>
-                                            <div style="display: flex; gap: 6px;">
-                                                <el-button size="small" text type="primary" @click="stepSchemaSampleJson = safeFormatJson(stepSchemaSampleJson)"
-                                                    :disabled="!stepSchemaSampleJson || !stepSchemaSampleJson.trim()">
-                                                    <i class="fa-solid fa-align-left" style="margin-right: 4px;"></i>格式化样本
-                                                </el-button>
-                                                <el-button size="small" text type="primary" @click="inferStepSchemaFromSample" :loading="stepInferring">
-                                                    <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>执行推导
-                                                </el-button>
-                                            </div>
-                                        </div>
-                                        <el-input v-model="stepSchemaSampleJson" type="textarea" :rows="2"
-                                            placeholder="在此粘贴外部已有的响应 JSON 文本，点击执行推导即可覆盖上方 Schema 规则"></el-input>
-                                    </div>
-                                </el-tab-pane>
-
                                 <!-- 5. 前置操作 (Pre-request) 标签页 -->
                                 <el-tab-pane label="前置操作" name="pre_actions">
                                     <div class="pm-preset-bar">
@@ -1345,6 +1305,45 @@
                                         <span>【提取变量】可将响应数据 (如 <code>data.id</code>) 存入变量, 供后续节点通过 <code v-pre>{{targetId}}</code> 引用, 实现链路参数传递。</span>
                                         <span style="color: #d97706; margin-left: 8px; font-weight: 500;"><i class="fa-brands fa-js" style="margin-right: 3px;"></i>支持 Postman JS: <code>pm.test()</code>、<code>pm.expect()</code>、<code>pm.response.json()</code></span>
                                     </div>
+                                </el-tab-pane>
+                                <!-- 6. Schema 契约标签页 -->
+                                <el-tab-pane label="Schema" name="schema">
+                                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+                                          <span style="font-size: 12px; color: #64748b;">
+                                              标准的 JSON Schema 规范 (Draft-7)，拨测时将自动验证该节点真实响应是否破坏此契约
+                                          </span>
+                                    <div style="display: flex; gap: 8px;">
+                                      <el-button size="small" type="primary" plain @click="formatStepSchemaJson">
+                                        <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>格式化 Schema
+                                      </el-button>
+                                      <el-button size="small" type="primary" plain @click="inferStepSchemaFromTestResult"
+                                                 :disabled="!stepTestResult || !stepTestResult.response_data">
+                                        <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>从当前响应推导
+                                      </el-button>
+                                    </div>
+                                  </div>
+                                  <div class="pm-code-box">
+                                    <el-input v-model="activeStep.schema_text" type="textarea" :rows="8"
+                                              placeholder="默认留空（不强校验 Schema）。可先发送调试请求后，点击【从当前响应推导】一键自动填入 Draft-7 契约规则"></el-input>
+                                  </div>
+
+                                  <!-- 备选手动推导折叠卡片 -->
+                                  <div style="margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
+                                    <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                      <span><i class="fa-solid fa-code" style="margin-right: 4px; color: #64748b;"></i>从自定义 JSON 样本辅助推导</span>
+                                      <div style="display: flex; gap: 6px;">
+                                        <el-button size="small" text type="primary" @click="stepSchemaSampleJson = safeFormatJson(stepSchemaSampleJson)"
+                                                   :disabled="!stepSchemaSampleJson || !stepSchemaSampleJson.trim()">
+                                          <i class="fa-solid fa-align-left" style="margin-right: 4px;"></i>格式化样本
+                                        </el-button>
+                                        <el-button size="small" text type="primary" @click="inferStepSchemaFromSample" :loading="stepInferring">
+                                          <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>执行推导
+                                        </el-button>
+                                      </div>
+                                    </div>
+                                    <el-input v-model="stepSchemaSampleJson" type="textarea" :rows="2"
+                                              placeholder="在此粘贴外部已有的响应 JSON 文本，点击执行推导即可覆盖上方 Schema 规则"></el-input>
+                                  </div>
                                 </el-tab-pane>
                             </el-tabs>
 

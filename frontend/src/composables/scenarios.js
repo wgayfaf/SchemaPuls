@@ -977,7 +977,11 @@ const openApiImportDialog = () => {
     apiImportMethodFilter.value = 'ALL'
     apiImportSelection.value = []
     apiImportDialogVisible.value = true
-    nextTick(() => apiImportTableRef.value?.clearSelection())
+    nextTick(() =>{
+        console.log('⚠️ 有人调用了 clearSelection！')
+        console.trace()
+        apiImportTableRef.value?.clearSelection()
+    })
 }
 
 const handleApiImportSelectionChange = (rows) => {
