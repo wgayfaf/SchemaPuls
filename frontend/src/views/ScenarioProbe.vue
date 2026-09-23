@@ -516,17 +516,24 @@
                         </div>
 
                         <!-- ★ 业务链路步骤节点流 (位于定时调度下方) -->
-                        <div style="margin-bottom: 16px; border: 1px solid #fed7aa; background: #fff7ed; border-radius: 8px; padding: 12px 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
-                                <div style="font-size: 12.5px; font-weight: 700; color: #9a3412; display: flex; align-items: center; gap: 6px;">
-                                    <i class="fa-solid fa-diagram-project" style="color: #f97316;"></i>
-                                    业务链路步骤 (Scenario Steps)
-                                    <el-tag size="small" type="warning" effect="plain">{{ scenarioSteps.length }} 个节点</el-tag>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                                    <span style="font-size: 11px; color: #9a3412; opacity: 0.75;">
-                                        点击节点切换配置 · <i class="fa-solid fa-broom" style="color: #d97706;"></i> 清理步骤无论成败均执行 (拨测闭环保障)
+                        <div class="scenario-steps-container">
+                            <div class="scenario-steps-header">
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <div style="font-size: 13px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                                        <i class="fa-solid fa-diagram-project" style="color: #f97316;"></i>
+                                        <span>业务链路步骤</span>
+                                    </div>
+                                    <el-tag size="small" type="warning" effect="plain" round style="font-weight: 600;">
+                                        共 {{ scenarioSteps.length }} 个节点
+                                    </el-tag>
+                                    <span style="font-size: 11px; color: #64748b; margin-left: 2px;">
+                                        点击节点切换配置 · 悬停可快速调序与复制 · <i class="fa-solid fa-broom" style="color: #d97706;"></i> 清理步骤异常时仍执行
                                     </span>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <el-button size="small" plain @click="addScenarioStep">
+                                        <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加节点
+                                    </el-button>
                                     <el-tooltip content="从接口管理选取已有接口, 自动填充节点配置, 无需重复手写" placement="top">
                                         <el-button size="small" type="warning" plain @click="openApiImportDialog">
                                             <i class="fa-solid fa-file-import" style="margin-right: 4px;"></i>从接口管理导入
@@ -535,132 +542,148 @@
                                 </div>
                             </div>
 
-                            <!-- 节点流: 节点卡片 + 箭头 + 添加节点 -->
-                            <div style="display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 4px 2px 6px;">
+                            <!-- 节点流: 节点卡片 + 平滑连接器 + 尾部添加节点 -->
+                            <div class="scenario-steps-track">
                                 <template v-for="(step, idx) in scenarioSteps" :key="idx">
                                     <!-- 节点卡片 -->
-                                    <div @click="selectScenarioStep(idx)"
-                                        style="position: relative; min-width: 132px; max-width: 132px; padding: 10px 10px 8px; border-radius: 8px; cursor: pointer; transition: all 0.15s; border: 1.5px solid; background: #ffffff; flex-shrink: 0;"
-                                        :style="activeStepIndex === idx
-                                            ? { borderColor: step.is_cleanup ? '#d97706' : '#f97316', background: step.is_cleanup ? '#fffbeb' : '#fff7ed', boxShadow: '0 2px 8px rgba(249, 115, 22, 0.18)' }
-                                            : { borderColor: step.is_cleanup ? '#fde68a' : '#e2e8f0', background: step.is_cleanup ? '#fffdf5' : '#ffffff' }">
-                                        <!-- 删除节点按钮 -->
-                                        <el-popconfirm :title="`确定删除节点 ${idx + 1} 吗？`" confirm-button-text="删除" cancel-button-text="取消"
-                                            @confirm="removeScenarioStep(idx)">
-                                            <template #reference>
-                                                <span @click.stop
-                                                    style="position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border-radius: 50%; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-size: 9px; border: 1px solid #fecaca; z-index: 2;">
-                                                    <i class="fa-solid fa-xmark"></i>
+                                    <div class="scenario-step-card"
+                                         :class="{
+                                           'is-active': activeStepIndex === idx,
+                                           'is-cleanup': step.is_cleanup
+                                         }"
+                                         @click="selectScenarioStep(idx)">
+
+                                        <!-- 卡片顶部行: 序号 + 方法 + 契约/清理图标 + 右侧悬浮操作群 -->
+                                        <div class="step-card-header">
+                                            <div class="step-card-header-left">
+                                                <span class="step-card-num">#{{ idx + 1 }}</span>
+                                                <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;"
+                                                      :style="getMethodBadgeStyle(step.http_method)">
+                                                    {{ step.http_method }}
                                                 </span>
-                                            </template>
-                                        </el-popconfirm>
-                                        <div style="font-size: 10px; color: #94a3b8; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-                                            <span>节点 {{ idx + 1 }}</span>
-                                            <div style="display: flex; align-items: center; gap: 3px;">
+                                                <!-- 契约与清理图标 -->
                                                 <span v-if="step.expected_schema && Object.keys(step.expected_schema).length"
-                                                    style="font-size: 9px; color: #0284c7; background: #e0f2fe; padding: 1px 3px; border-radius: 3px;" title="已配置响应契约校验">
-                                                    <i class="fa-solid fa-shield-halved"></i> 契约
+                                                      style="font-size: 9px; color: #0284c7; background: #e0f2fe; padding: 1px 4px; border-radius: 3px;"
+                                                      title="已配置响应契约校验">
+                                                    <i class="fa-solid fa-shield-halved"></i>
                                                 </span>
-                                                <el-tooltip v-if="step.is_cleanup" content="清理步骤 (finally 语义)" placement="top">
-                                                    <i class="fa-solid fa-broom" style="color: #d97706;"></i>
+                                                <el-tooltip v-if="step.is_cleanup" content="清理步骤 (finally 语义，异常时仍执行)" placement="top">
+                                                    <span style="font-size: 9px; color: #d97706; background: #fef3c7; padding: 1px 4px; border-radius: 3px;">
+                                                        <i class="fa-solid fa-broom"></i> 清理
+                                                    </span>
                                                 </el-tooltip>
                                             </div>
-                                        </div>
-                                        <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
-                                            <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" :style="getMethodBadgeStyle(step.http_method)">{{ step.http_method }}</span>
-                                        </div>
-<!--                                        <div style="font-size: 11.5px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-->
-<!--                                            {{ step.name || '未命名节点' }}-->
-<!--                                        </div>-->
 
-                                        <div
-                                            v-if="editingStepIndex !== idx"
-                                            style="display: flex; align-items: center; gap: 4px;"
-                                        >
-                                          <div
-                                              @dblclick="startEditStep(idx)"
-                                              style="
-                                              font-size: 11.5px;
-                                              font-weight: 600;
-                                              color: #0f172a;
-                                              white-space: nowrap;
-                                              overflow: hidden;
-                                              text-overflow: ellipsis;
-                                              flex: 1;
-                                              min-width: 0;"
-                                          >
-                                            {{ step.name || '未命名节点' }}
-                                          </div>
-                                          <i
-                                              class="fa-solid fa-pen-to-square"
-                                              @click.stop="startEditStep(idx)"
-                                              title="编辑节点名称"
-                                              style="
-                                              font-size: 10px;
-                                              color: #94a3b8;
-                                              cursor: pointer;
-                                              flex-shrink: 0;
-                                              opacity: 0.6;
-                                              transition: opacity 0.15s, color 0.15s;"
-                                              @mouseenter="e => { e.target.style.opacity = '1'; e.target.style.color = '#f97316' }"
-                                              @mouseleave="e => { e.target.style.opacity = '0.6'; e.target.style.color = '#94a3b8' }"
-                                          ></i>
+                                            <!-- 悬浮操作群: 平常隐蔽/微淡，移入卡片时清晰显示，杜绝堆叠拥挤感 -->
+                                            <div class="step-card-actions" @click.stop>
+                                                <el-tooltip content="前移一位" placement="top" :enterable="false">
+                                                    <button class="step-card-action-btn" :disabled="idx === 0" @click.stop="moveStepLeft(idx)">
+                                                        <i class="fa-solid fa-chevron-left"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                                <el-tooltip content="后移一位" placement="top" :enterable="false">
+                                                    <button class="step-card-action-btn" :disabled="idx === scenarioSteps.length - 1" @click.stop="moveStepRight(idx)">
+                                                        <i class="fa-solid fa-chevron-right"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                                <el-tooltip content="复制节点" placement="top" :enterable="false">
+                                                    <button class="step-card-action-btn" @click.stop="cloneScenarioStep(idx)">
+                                                        <i class="fa-solid fa-copy"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                                <el-popconfirm :title="`确定删除节点 ${idx + 1} 吗？`" confirm-button-text="删除" cancel-button-text="取消"
+                                                               @confirm="removeScenarioStep(idx)">
+                                                    <template #reference>
+                                                        <button class="step-card-action-btn danger" @click.stop title="删除节点">
+                                                            <i class="fa-solid fa-trash-can"></i>
+                                                        </button>
+                                                    </template>
+                                                </el-popconfirm>
+                                            </div>
                                         </div>
 
-                                        <input
-                                            v-else
-                                            :ref="el => { if (el) stepNameInputRefs[idx] = el }"
-                                            v-model="step.name"
-                                            @blur="finishEditStep"
-                                            @keyup.enter="finishEditStep"
-                                            @keyup.esc="cancelEditStep(idx)"
-                                            style="
-                                            font-size: 11.5px;
-                                            font-weight: 600;
-                                            color: #0f172a;
-                                            width: 100%;
-                                            padding: 0;
-                                            margin: 0;
-                                            border: none;
-                                            border-bottom: 1px solid #f97316;
-                                            background: transparent;
-                                            outline: none;
-                                            font-family: inherit;
-                                            line-height: 1.4;
-                                            box-sizing: border-box;
-                                          " />
+                                        <!-- 卡片主体: 节点名称 (双击编辑) + 路径 -->
+                                        <div class="step-card-body">
+                                            <div v-if="editingStepIndex !== idx"
+                                                 class="step-card-name"
+                                                 @dblclick="startEditStep(idx)"
+                                                 :title="step.name || '未命名节点'">
+                                                <span>{{ step.name || '未命名节点' }}</span>
+                                                <i class="fa-solid fa-pen-to-square step-name-edit-icon"
+                                                   @click.stop="startEditStep(idx)"
+                                                   title="编辑节点名称"></i>
+                                            </div>
+                                            <input v-else
+                                                   :ref="el => { if (el) stepNameInputRefs[idx] = el }"
+                                                   v-model="step.name"
+                                                   class="step-name-input"
+                                                   @blur="finishEditStep"
+                                                   @keyup.enter="finishEditStep"
+                                                   @keyup.esc="cancelEditStep(idx)"
+                                                   @click.stop />
 
-                                        <div style="font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                            {{ step.http_path || '/' }}
+                                            <div class="step-card-path" :title="step.http_path || '/'">
+                                                {{ step.http_path || '/' }}
+                                            </div>
                                         </div>
-                                        <div v-if="step._testResult" style="margin-top: 4px; font-size: 9.5px;">
-                                            <span v-if="step._testResult.schema_matched === true" style="color: #059669; font-weight: 600;">
-                                                <i class="fa-solid fa-circle-check"></i> 契约通过
-                                            </span>
-                                            <span v-else-if="step._testResult.schema_matched === false" style="color: #dc2626; font-weight: 600;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> 契约突变
-                                            </span>
-                                            <span v-else-if="step._testResult.ok" style="color: #059669;">
-                                                <i class="fa-solid fa-circle-check"></i> HTTP {{ step._testResult.status_code }}
-                                            </span>
-                                            <span v-else style="color: #dc2626;">
-                                                <i class="fa-solid fa-circle-xmark"></i> 调试失败
-                                            </span>
+
+                                        <!-- 卡片底部: 调试结果或规则统计 -->
+                                        <div class="step-card-footer">
+                                            <div v-if="step._testResult" style="font-size: 10px; display: flex; align-items: center; gap: 4px;">
+                                                <span v-if="step._testResult.schema_matched === true" style="color: #059669; font-weight: 600;">
+                                                    <i class="fa-solid fa-circle-check"></i> 契约通过
+                                                </span>
+                                                <span v-else-if="step._testResult.schema_matched === false" style="color: #dc2626; font-weight: 600;">
+                                                    <i class="fa-solid fa-triangle-exclamation"></i> 契约突变
+                                                </span>
+                                                <span v-else-if="step._testResult.ok" style="color: #059669;">
+                                                    <i class="fa-solid fa-circle-check"></i> HTTP {{ step._testResult.status_code }}
+                                                </span>
+                                                <span v-else style="color: #dc2626;">
+                                                    <i class="fa-solid fa-circle-xmark"></i> 调试失败
+                                                </span>
+                                            </div>
+                                            <div v-else style="color: #94a3b8; font-size: 10px; display: flex; align-items: center; gap: 4px;">
+                                                <span v-if="(step.pre_actions || []).length || (step.post_actions || []).length">
+                                                    <i class="fa-solid fa-bolt" style="font-size: 9px; color: #f59e0b;"></i>
+                                                    {{ (step.pre_actions || []).length + (step.post_actions || []).length }} 项规则
+                                                </span>
+                                                <span v-else style="opacity: 0.7;">未调试</span>
+                                            </div>
+                                            <span v-if="activeStepIndex === idx" class="step-active-dot" title="当前编辑节点"></span>
                                         </div>
                                     </div>
-                                    <!-- 箭头连接 -->
-                                    <div style="display: flex; align-items: center; padding: 0 6px; flex-shrink: 0;">
-                                        <i class="fa-solid fa-angles-right" style="color: #fdba74; font-size: 13px;"></i>
+
+                                    <!-- 节点间连接器: 默认平滑箭头导引线，悬浮平滑呈现 (+) 按钮 -->
+                                    <div class="step-connector">
+                                        <div class="step-connector-line"></div>
+                                        <el-popover trigger="hover" :width="160" placement="top" popper-class="step-insert-popover">
+                                            <template #reference>
+                                                <div class="step-connector-add-btn" @click.stop="insertScenarioStep(idx + 1)" title="在此插入新节点">
+                                                    <i class="fa-solid fa-plus"></i>
+                                                </div>
+                                            </template>
+                                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                                <div style="font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 2px;">
+                                                    在节点 {{ idx + 1 }} 与 {{ idx + 2 }} 间插入:
+                                                </div>
+                                                <el-button size="small" type="primary" plain @click="insertScenarioStep(idx + 1)" style="justify-content: flex-start; margin: 0; width: 100%;">
+                                                    <i class="fa-solid fa-circle-plus" style="margin-right: 6px;"></i>插入空白节点
+                                                </el-button>
+                                                <el-button size="small" type="warning" plain @click="openApiImportDialog('after_' + idx)" style="justify-content: flex-start; margin: 0; width: 100%;">
+                                                    <i class="fa-solid fa-file-import" style="margin-right: 6px;"></i>从接口导入到此处
+                                                </el-button>
+                                            </div>
+                                        </el-popover>
+                                        <div class="step-connector-line"></div>
+                                        <i class="fa-solid fa-angle-right step-connector-arrow"></i>
                                     </div>
                                 </template>
 
-                                <!-- 添加节点 -->
-                                <div @click="addScenarioStep"
-                                    style="min-width: 108px; border: 1.5px dashed #fdba74; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: #ea580c; transition: all 0.15s; flex-shrink: 0; padding: 10px; background: #fffbf7;"
-                                    onmouseover="this.style.borderColor='#f97316'; this.style.color='#c2410c';"
-                                    onmouseout="this.style.borderColor='#fdba74'; this.style.color='#ea580c';">
-                                    <i class="fa-solid fa-circle-plus" style="font-size: 18px;"></i>
-                                    <span style="font-size: 12px; font-weight: 600;">添加节点</span>
+                                <!-- 尾部添加节点卡片 -->
+                                <div class="step-add-card" @click="addScenarioStep" title="在链路末尾追加新节点">
+                                    <i class="fa-solid fa-plus" style="font-size: 16px;"></i>
+                                    <span style="font-size: 11.5px; font-weight: 600;">添加节点</span>
                                 </div>
                             </div>
                         </div>
@@ -1632,80 +1655,161 @@
                     </el-dialog>
 
                     <!-- ================= 从接口管理导入接口为链路节点 ================= -->
-                    <el-dialog v-model="apiImportDialogVisible" title="从接口管理导入" width="780px" top="8vh"
+                    <el-dialog v-model="apiImportDialogVisible" title="从接口管理导入" width="960px" top="6vh"
                         class="postman-dialog" append-to-body destroy-on-close>
-                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
-                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <el-input v-model="apiImportSearch" size="small" placeholder="搜索接口名称 / 路径 / 机器" clearable style="width: 220px;">
-                                    <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
-                                </el-input>
-                                <el-select v-model="apiImportMethodFilter" size="small" style="width: 110px;">
-                                    <el-option label="全部方法" value="ALL"></el-option>
-                                    <el-option label="GET" value="GET"></el-option>
-                                    <el-option label="POST" value="POST"></el-option>
-                                    <el-option label="PUT" value="PUT"></el-option>
-                                    <el-option label="DELETE" value="DELETE"></el-option>
-                                    <el-option label="PATCH" value="PATCH"></el-option>
-                                </el-select>
+                        <div style="display: flex; gap: 16px; min-height: 480px; max-height: 540px;">
+                            <!-- 左侧: 接口选择表 -->
+                            <div style="flex: 1.35; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid #e2e8f0; padding-right: 16px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div style="font-size: 12.5px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                                        <i class="fa-solid fa-cubes" style="color: #f97316;"></i>
+                                        <span>从接口库勾选</span>
+                                        <span style="font-size: 11px; font-weight: normal; color: #64748b;">(勾选将加入右侧执行链路)</span>
+                                    </div>
+                                    <span style="font-size: 11px; color: #64748b;">
+                                        可选 <b style="color: #0f172a;">{{ importableApis.length }}</b> 个
+                                    </span>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                                    <el-input v-model="apiImportSearch" size="small" placeholder="搜索接口名称 / 路径 / 宿主机器" clearable style="flex: 1;">
+                                        <template #prefix><i class="fa-solid fa-magnifying-glass" style="color: #94a3b8;"></i></template>
+                                    </el-input>
+                                    <el-select v-model="apiImportMethodFilter" size="small" style="width: 105px;">
+                                        <el-option label="全部方法" value="ALL"></el-option>
+                                        <el-option label="GET" value="GET"></el-option>
+                                        <el-option label="POST" value="POST"></el-option>
+                                        <el-option label="PUT" value="PUT"></el-option>
+                                        <el-option label="DELETE" value="DELETE"></el-option>
+                                        <el-option label="PATCH" value="PATCH"></el-option>
+                                    </el-select>
+                                </div>
+
+                                <div style="flex: 1; min-height: 0; overflow: hidden;">
+                                    <el-table ref="apiImportTableRef" :data="importableApis" row-key="id" size="small" height="100%"
+                                        @selection-change="handleApiImportSelectionChange"
+                                        empty-text="接口管理中暂无接口，请先在【接口管理】页面创建">
+                                        <el-table-column type="selection" :reserve-selection="true" width="40"></el-table-column>
+                                        <el-table-column label="方法" width="75">
+                                            <template #default="{ row }">
+                                                <span style="font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; display: inline-block;"
+                                                    :style="getMethodBadgeStyle(row.http_method)">{{ row.http_method }}</span>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="接口名称与路径" min-width="160">
+                                            <template #default="{ row }">
+                                                <div style="font-weight: 600; color: #0f172a; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="row.name">
+                                                    {{ row.name }}
+                                                </div>
+                                                <div style="font-size: 10.5px; color: #0284c7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="row.http_path">
+                                                    {{ row.http_path }}
+                                                </div>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="宿主机器" width="115">
+                                            <template #default="{ row }">
+                                                <div style="font-size: 11px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="row.machine_name">{{ row.machine_name }}</div>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="覆盖" width="65" align="center">
+                                            <template #default="{ row }">
+                                                <el-tooltip content="用该接口的配置覆盖填充当前选中的链路节点" placement="top">
+                                                    <el-button size="small" link type="primary" @click="fillActiveStepFromApi(row)" style="font-size: 11px; padding: 0;">覆盖</el-button>
+                                                </el-tooltip>
+                                            </template>
+                                        </el-table-column>
+                                    </el-table>
+                                </div>
                             </div>
-                            <span style="font-size: 11.5px; color: #64748b;">
-                                共 <b style="color: #0f172a;">{{ importableApis.length }}</b> 个接口 · 已选 <b style="color: #c2410c;">{{ apiImportSelection.length }}</b> 个
-                            </span>
+
+                            <!-- 右侧: 导入执行顺序与位置控制预览 -->
+                            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div style="font-size: 12.5px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                                        <i class="fa-solid fa-list-ol" style="color: #2563eb;"></i>
+                                        <span>即将导入的节点顺序</span>
+                                        <el-tag size="small" type="primary" effect="plain" round>{{ apiImportOrderedList.length }} 个节点</el-tag>
+                                    </div>
+                                    <el-button v-if="apiImportOrderedList.length > 0" size="small" link type="danger" @click="clearAllImportedApis" style="font-size: 11.5px; padding: 0;">
+                                        <i class="fa-solid fa-trash-can" style="margin-right: 3px;"></i>清空全部
+                                    </el-button>
+                                </div>
+
+                                <!-- 插入位置设置 -->
+                                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;">
+                                    <div style="font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                                        <i class="fa-solid fa-location-dot" style="color: #f97316;"></i>插入到链路位置:
+                                    </div>
+                                    <el-select v-model="apiImportInsertPosition" size="small" style="width: 100%;">
+                                        <el-option value="end" label="追加到链路末尾 (默认)"></el-option>
+                                        <el-option v-if="activeStepIndex >= 0 && scenarioSteps.length > 0" value="after_active" :label="`插入到当前选中节点之后 (节点 ${activeStepIndex + 1} 之后)`"></el-option>
+                                        <el-option value="start" label="插入到链路开头 (节点 1 之前)"></el-option>
+                                        <el-option v-for="(step, sIdx) in scenarioSteps" :key="sIdx" :value="'after_' + sIdx" :label="`插入到节点 ${sIdx + 1} (${step.name || '未命名'}) 之后`"></el-option>
+                                    </el-select>
+                                </div>
+
+                                <!-- 顺序预览列表 -->
+                                <div style="flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px; background: #ffffff; padding: 6px;">
+                                    <div v-if="apiImportOrderedList.length === 0" style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; text-align: center; padding: 20px;">
+                                        <i class="fa-solid fa-arrow-left" style="font-size: 22px; color: #cbd5e1; margin-bottom: 8px;"></i>
+                                        <div style="font-weight: 600; color: #64748b; margin-bottom: 4px;">暂未勾选任何接口</div>
+                                        <div style="line-height: 1.5;">请在左侧勾选需要导入的接口，系统将按照您的勾选先后顺序排列，您也可以在此自由上下调序。</div>
+                                    </div>
+
+                                    <div v-else style="display: flex; flex-direction: column; gap: 6px;">
+                                        <div v-for="(item, oIdx) in apiImportOrderedList" :key="item.id"
+                                            style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; transition: all 0.15s;">
+                                            <!-- 序号 Badge -->
+                                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: #2563eb; color: #ffffff; font-size: 10.5px; font-weight: 700; flex-shrink: 0;">
+                                                {{ oIdx + 1 }}
+                                            </span>
+                                            <!-- 方法 Badge -->
+                                            <span style="font-size: 9.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px; flex-shrink: 0;"
+                                                :style="getMethodBadgeStyle(item.http_method)">{{ item.http_method }}</span>
+                                            <!-- 接口名称与路径 -->
+                                            <div style="flex: 1; min-width: 0;">
+                                                <div style="font-size: 11.5px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="item.name">
+                                                    {{ item.name }}
+                                                    <span v-if="(item.http_method || '').toUpperCase() === 'DELETE'" style="font-size: 9px; background: #fef3c7; color: #d97706; padding: 0 4px; border-radius: 3px; margin-left: 4px;">清理步骤</span>
+                                                </div>
+                                                <div style="font-size: 10px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="item.http_path">
+                                                    {{ item.http_path }}
+                                                </div>
+                                            </div>
+                                            <!-- 上移 / 下移 / 移除 -->
+                                            <div style="display: flex; align-items: center; gap: 3px; flex-shrink: 0;">
+                                                <el-tooltip content="上移一步" placement="top" :enterable="false">
+                                                    <button class="step-card-mini-btn" :disabled="oIdx === 0" @click="moveImportedApiUp(oIdx)">
+                                                        <i class="fa-solid fa-arrow-up"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                                <el-tooltip content="下移一步" placement="top" :enterable="false">
+                                                    <button class="step-card-mini-btn" :disabled="oIdx === apiImportOrderedList.length - 1" @click="moveImportedApiDown(oIdx)">
+                                                        <i class="fa-solid fa-arrow-down"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                                <el-tooltip content="移除" placement="top" :enterable="false">
+                                                    <button class="step-card-mini-btn" @click="removeImportedApi(item, oIdx)" style="color: #dc2626;">
+                                                        <i class="fa-solid fa-xmark"></i>
+                                                    </button>
+                                                </el-tooltip>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <el-table ref="apiImportTableRef" :data="importableApis" row-key="id" size="small" max-height="380"
-                            @selection-change="handleApiImportSelectionChange"
-                            empty-text="接口管理中暂无接口，请先在【接口管理】页面创建">
-                            <el-table-column type="selection" :reserve-selection="true" width="42"></el-table-column>
-                            <el-table-column label="方法" width="80">
-                                <template #default="{ row }">
-                                    <span style="font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; display: inline-block;"
-                                        :style="getMethodBadgeStyle(row.http_method)">{{ row.http_method }}</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="接口名称" min-width="140">
-                                <template #default="{ row }">
-                                    <span style="font-weight: 600; color: #0f172a; font-size: 12.5px;">{{ row.name }}</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="请求路径" min-width="190">
-                                <template #default="{ row }">
-                                    <code style="font-size: 11px; color: #0284c7; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; word-break: break-all;">{{ row.http_path }}</code>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="契约校验" width="90" align="center">
-                                <template #default="{ row }">
-                                    <el-tag v-if="row.last_schema_matched === true" type="success" size="small">一致</el-tag>
-                                    <el-tag v-else-if="row.last_schema_matched === false" type="danger" size="small">突变</el-tag>
-                                    <el-tag v-else-if="!row.schema_configured" type="info" effect="plain" size="small">未配置</el-tag>
-                                    <span v-else style="color: var(--text-muted); font-size: 12px;">未校验</span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="归属" width="150">
-                                <template #default="{ row }">
-                                    <div style="font-size: 11.5px; color: #475569;">{{ row.machine_name }}</div>
-                                    <div style="font-size: 10.5px; color: #94a3b8;">{{ row.environment_name }}</div>
-                                </template>
-                            </el-table-column>
-                            <el-table-column label="操作" width="110" fixed="right">
-                                <template #default="{ row }">
-                                    <el-tooltip content="用该接口的配置覆盖填充当前选中的链路节点" placement="top">
-                                        <el-button size="small" link type="primary" @click="fillActiveStepFromApi(row)">填入当前节点</el-button>
-                                    </el-tooltip>
-                                </template>
-                            </el-table-column>
-                        </el-table>
-
-                        <div style="margin-top: 10px; font-size: 11.5px; color: #64748b; display: flex; align-items: flex-start; gap: 6px;">
-                            <i class="fa-solid fa-circle-info" style="color: #2563eb; margin-top: 1px;"></i>
-                            <span>导入将完整复制接口的路径、Params、Headers、Body、鉴权与前置/后置操作配置；请求地址将使用当前场景的基准地址 (宿主机器)。批量导入时 DELETE 接口将自动标记为清理步骤。</span>
+                        <div style="margin-top: 10px; font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-circle-info" style="color: #2563eb;"></i>
+                            <span>导入将完整复制接口的路径、Params、Headers、Body、鉴权与前置/后置配置；DELETE 接口将自动标记为清理步骤。</span>
                         </div>
 
                         <template #footer>
                             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                                 <el-button @click="apiImportDialogVisible = false">取消</el-button>
-                                <el-button type="primary" :disabled="apiImportSelection.length === 0" @click="confirmImportApisAsSteps">
-                                    <i class="fa-solid fa-circle-plus" style="margin-right: 4px;"></i>添加为节点 ({{ apiImportSelection.length }})
+                                <el-button type="primary" :disabled="apiImportOrderedList.length === 0" @click="confirmImportApisAsSteps">
+                                    <i class="fa-solid fa-circle-plus" style="margin-right: 4px;"></i>确认按序导入 ({{ apiImportOrderedList.length }} 个节点)
                                 </el-button>
                             </div>
                         </template>
@@ -2146,6 +2250,11 @@ export default {
             activeStepIndex: wb.activeStepIndex,
             activeStep: wb.activeStep,
             addScenarioStep: wb.addScenarioStep,
+            insertScenarioStep: wb.insertScenarioStep,
+            moveScenarioStep: wb.moveScenarioStep,
+            moveStepLeft: wb.moveStepLeft,
+            moveStepRight: wb.moveStepRight,
+            cloneScenarioStep: wb.cloneScenarioStep,
             removeScenarioStep: wb.removeScenarioStep,
             selectScenarioStep: wb.selectScenarioStep,
             stepActiveTab: wb.stepActiveTab,
@@ -2191,6 +2300,12 @@ export default {
             apiImportMethodFilter: wb.apiImportMethodFilter,
             apiImportSelection: wb.apiImportSelection,
             apiImportTableRef: wb.apiImportTableRef,
+            apiImportOrderedList: wb.apiImportOrderedList,
+            apiImportInsertPosition: wb.apiImportInsertPosition,
+            moveImportedApiUp: wb.moveImportedApiUp,
+            moveImportedApiDown: wb.moveImportedApiDown,
+            removeImportedApi: wb.removeImportedApi,
+            clearAllImportedApis: wb.clearAllImportedApis,
             importableApis: wb.importableApis,
             openApiImportDialog: wb.openApiImportDialog,
             handleApiImportSelectionChange: wb.handleApiImportSelectionChange,

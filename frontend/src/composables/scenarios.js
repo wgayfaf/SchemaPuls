@@ -634,6 +634,63 @@ const addScenarioStep = () => {
     stepActiveTab.value = "params"
 }
 
+// 在指定索引位置插入新步骤 (未传参或越界则追加到末尾)
+const insertScenarioStep = (index = null) => {
+    const newStep = createEmptyStep()
+    const targetIndex = (index === null || index === undefined)
+        ? scenarioSteps.value.length
+        : Math.min(Math.max(0, index), scenarioSteps.value.length)
+    
+    scenarioSteps.value.splice(targetIndex, 0, newStep)
+    activeStepIndex.value = targetIndex
+    stepActiveTab.value = "params"
+    ElMessage.success(`已在第 ${targetIndex + 1} 位插入新节点`)
+}
+
+// 任意两步骤间移动/换位
+const moveScenarioStep = (fromIndex, toIndex) => {
+    if (fromIndex < 0 || fromIndex >= scenarioSteps.value.length) return
+    if (toIndex < 0 || toIndex >= scenarioSteps.value.length) return
+    if (fromIndex === toIndex) return
+
+    const [movedStep] = scenarioSteps.value.splice(fromIndex, 1)
+    scenarioSteps.value.splice(toIndex, 0, movedStep)
+
+    // 保持当前聚焦节点跟随或者正确修正索引
+    if (activeStepIndex.value === fromIndex) {
+        activeStepIndex.value = toIndex
+    } else if (fromIndex < activeStepIndex.value && toIndex >= activeStepIndex.value) {
+        activeStepIndex.value -= 1
+    } else if (fromIndex > activeStepIndex.value && toIndex <= activeStepIndex.value) {
+        activeStepIndex.value += 1
+    }
+}
+
+const moveStepLeft = (idx) => {
+    if (idx <= 0) return
+    moveScenarioStep(idx, idx - 1)
+}
+
+const moveStepRight = (idx) => {
+    if (idx >= scenarioSteps.value.length - 1) return
+    moveScenarioStep(idx, idx + 1)
+}
+
+// 复制节点配置 (在目标节点后直接追加副本)
+const cloneScenarioStep = (idx) => {
+    if (idx < 0 || idx >= scenarioSteps.value.length) return
+    const orig = scenarioSteps.value[idx]
+    const cloned = JSON.parse(JSON.stringify({
+        ...orig,
+        name: orig.name ? `${orig.name} (副本)` : '节点副本',
+        _testResult: null
+    }))
+    scenarioSteps.value.splice(idx + 1, 0, cloned)
+    activeStepIndex.value = idx + 1
+    stepActiveTab.value = "params"
+    ElMessage.success(`已复制节点为第 ${idx + 2} 位节点`)
+}
+
 const removeScenarioStep = (idx) => {
     const step = scenarioSteps.value[idx]
     const tip = step && step.is_cleanup
@@ -645,7 +702,9 @@ const removeScenarioStep = (idx) => {
         type: 'warning'
     }).then(() => {
         scenarioSteps.value.splice(idx, 1)
-        if (activeStepIndex.value >= scenarioSteps.value.length) {
+        if (activeStepIndex.value > idx) {
+            activeStepIndex.value -= 1
+        } else if (activeStepIndex.value >= scenarioSteps.value.length) {
             activeStepIndex.value = Math.max(0, scenarioSteps.value.length - 1)
         }
         ElMessage.success('节点已删除')
@@ -904,6 +963,10 @@ const apiImportSearch = ref('')
 const apiImportMethodFilter = ref('ALL')
 const apiImportSelection = ref([])
 const apiImportTableRef = ref(null)
+// 保持用户勾选次序并支持自由上下微调的有序列表
+const apiImportOrderedList = ref([])
+// 插入位置: 'end' (追加到末尾) | 'after_active' (当前选中之后) | 'start' (开头) | 'after_${idx}'
+const apiImportInsertPosition = ref('end')
 
 // 可导入接口集合 (来自【接口管理】apiList, 支持名称/路径/机器搜索与方法筛选)
 const importableApis = computed(() => {
@@ -972,10 +1035,18 @@ const mapApiToScenarioStep = (api) => {
     }
 }
 
-const openApiImportDialog = () => {
+const openApiImportDialog = (presetPosition = null) => {
     apiImportSearch.value = ''
     apiImportMethodFilter.value = 'ALL'
     apiImportSelection.value = []
+    apiImportOrderedList.value = []
+    if (presetPosition !== null && presetPosition !== undefined) {
+        apiImportInsertPosition.value = presetPosition
+    } else if (activeStepIndex.value >= 0 && scenarioSteps.value.length > 0) {
+        apiImportInsertPosition.value = 'after_active'
+    } else {
+        apiImportInsertPosition.value = 'end'
+    }
     apiImportDialogVisible.value = true
     nextTick(() => {
         apiImportTableRef.value?.clearSelection()
@@ -984,23 +1055,94 @@ const openApiImportDialog = () => {
 
 const handleApiImportSelectionChange = (rows) => {
     apiImportSelection.value = rows || []
+    const currentSelectedIds = new Set((rows || []).map(r => r.id))
+    
+    // 1. 过滤已取消勾选的项目
+    const filtered = apiImportOrderedList.value.filter(item => currentSelectedIds.has(item.id))
+    
+    // 2. 将新勾选的项目顺序追加到有序列表末尾 (保留点选先后顺序)
+    const existingIds = new Set(filtered.map(item => item.id))
+    for (const row of (rows || [])) {
+        if (!existingIds.has(row.id)) {
+            filtered.push(row)
+            existingIds.add(row.id)
+        }
+    }
+    apiImportOrderedList.value = filtered
 }
 
-// 批量导入: 将选中接口依次追加到当前选中节点之后
+// 在待导入有序列表中上移一项
+const moveImportedApiUp = (idx) => {
+    if (idx <= 0 || idx >= apiImportOrderedList.value.length) return
+    const list = [...apiImportOrderedList.value]
+    const temp = list[idx]
+    list[idx] = list[idx - 1]
+    list[idx - 1] = temp
+    apiImportOrderedList.value = list
+}
+
+// 在待导入有序列表中下移一项
+const moveImportedApiDown = (idx) => {
+    if (idx < 0 || idx >= apiImportOrderedList.value.length - 1) return
+    const list = [...apiImportOrderedList.value]
+    const temp = list[idx]
+    list[idx] = list[idx + 1]
+    list[idx + 1] = temp
+    apiImportOrderedList.value = list
+}
+
+// 从待导入列表中移除单项并同步取消表格中的勾选状态
+const removeImportedApi = (apiItem, idx) => {
+    if (idx >= 0 && idx < apiImportOrderedList.value.length) {
+        apiImportOrderedList.value.splice(idx, 1)
+    }
+    const matched = importableApis.value.find(a => a.id === apiItem.id)
+    if (matched && apiImportTableRef.value) {
+        apiImportTableRef.value.toggleRowSelection(matched, false)
+    }
+}
+
+// 清空待导入选择
+const clearAllImportedApis = () => {
+    apiImportOrderedList.value = []
+    apiImportSelection.value = []
+    apiImportTableRef.value?.clearSelection()
+}
+
+// 批量按序导入: 根据选择的位置与排序好的接口列表插入到链路节点
 const confirmImportApisAsSteps = () => {
-    if (!apiImportSelection.value.length) {
+    if (!apiImportOrderedList.value.length) {
         ElMessage.warning('请先勾选需要导入的接口！')
         return
     }
-    const steps = apiImportSelection.value.map(mapApiToScenarioStep)
-    const insertAt = activeStepIndex.value + 1
+    const steps = apiImportOrderedList.value.map(mapApiToScenarioStep)
+    
+    let insertAt = scenarioSteps.value.length
+    if (apiImportInsertPosition.value === 'start') {
+        insertAt = 0
+    } else if (apiImportInsertPosition.value === 'end') {
+        insertAt = scenarioSteps.value.length
+    } else if (apiImportInsertPosition.value === 'after_active') {
+        insertAt = (activeStepIndex.value >= 0 && activeStepIndex.value < scenarioSteps.value.length)
+            ? activeStepIndex.value + 1
+            : scenarioSteps.value.length
+    } else if (typeof apiImportInsertPosition.value === 'string' && apiImportInsertPosition.value.startsWith('after_')) {
+        const targetIdx = parseInt(apiImportInsertPosition.value.replace('after_', ''), 10)
+        insertAt = (!isNaN(targetIdx) && targetIdx >= 0) ? targetIdx + 1 : scenarioSteps.value.length
+    } else if (typeof apiImportInsertPosition.value === 'number') {
+        insertAt = apiImportInsertPosition.value
+    }
+    insertAt = Math.min(Math.max(0, insertAt), scenarioSteps.value.length)
+
     scenarioSteps.value.splice(insertAt, 0, ...steps)
     activeStepIndex.value = insertAt
     apiImportDialogVisible.value = false
     apiImportSelection.value = []
+    apiImportOrderedList.value = []
     apiImportTableRef.value?.clearSelection()
+
     const cleanupCount = steps.filter(s => s.is_cleanup).length
-    ElMessage.success(`已导入 ${steps.length} 个接口为业务链路节点${cleanupCount ? ` (其中 ${cleanupCount} 个 DELETE 接口已自动标记为清理步骤)` : ''}`)
+    ElMessage.success(`已在第 ${insertAt + 1} 位顺序导入 ${steps.length} 个接口作为链路节点${cleanupCount ? ` (其中 ${cleanupCount} 个 DELETE 接口已自动标记为清理步骤)` : ''}`)
 }
 
 // 单个导入: 用选中接口的配置覆盖填充当前选中节点
@@ -1639,6 +1781,7 @@ export {
     scenarioTotalCount, scenarioActiveCount, scenarioCleanupCount, scenarioStepTotalCount,
     scenarioMachineDisplayName,
     createEmptyStep, addScenarioStep, removeScenarioStep, selectScenarioStep,
+    insertScenarioStep, moveScenarioStep, moveStepLeft, moveStepRight, cloneScenarioStep,
     resetScenarioBaseUrlToMachine,
     scenarioSystemDefaultHeaders, showStepDefaultHeaders, activeScenarioDefaultHeadersCount, isStepHeaderOverridden,
     addStepParamRow, removeStepParamRow, addStepHeaderRow, removeStepHeaderRow,
@@ -1651,6 +1794,7 @@ export {
     scenarioRunningId, scenarioResultVisible, scenarioResult, stepTestRunning, stepTestResult,
     handleRunScenario, getStepResultBadge, handleTestRunStep,
     apiImportDialogVisible, apiImportSearch, apiImportMethodFilter, apiImportSelection, apiImportTableRef,
+    apiImportOrderedList, apiImportInsertPosition, moveImportedApiUp, moveImportedApiDown, removeImportedApi, clearAllImportedApis,
     importableApis, openApiImportDialog, handleApiImportSelectionChange, confirmImportApisAsSteps, fillActiveStepFromApi,
     getMethodBadgeStyle, getScenarioStatusBadgeClass, getScenarioStatusText,
     scenarioMetricsDrawerVisible, scenarioMetricsLoading, activeScenarioMetrics, scenarioHistoryList,

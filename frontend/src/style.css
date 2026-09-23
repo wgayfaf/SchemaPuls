@@ -368,7 +368,7 @@
             padding: 2px 8px;
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             font-size: 11.5px;
         }
         .status-badge.healthy { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
@@ -1093,5 +1093,334 @@
             border-color: #f97316 !important;
             background-color: #fff7ed !important;
             box-shadow: 0 1px 4px rgba(249, 115, 22, 0.15);
+        }
+
+        /* ================= 场景步骤链路节点流样式重构 ================= */
+        .scenario-steps-container {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px 16px 14px;
+            margin-bottom: 16px;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+        }
+
+        .scenario-steps-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .scenario-steps-track {
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            overflow-x: auto;
+            padding: 6px 2px 8px;
+        }
+
+        /* 场景步骤卡片: 优雅卡片布局、呼吸感间距、层级清晰 */
+        .scenario-step-card {
+            position: relative;
+            min-width: 176px;
+            max-width: 182px;
+            padding: 9px 11px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1.5px solid #e2e8f0;
+            background: #ffffff;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+        }
+
+        .scenario-step-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            transform: translateY(-1px);
+        }
+
+        .scenario-step-card.is-active {
+            border-color: #f97316;
+            background: #ffffff;
+            box-shadow: 0 0 0 1px #f97316, 0 4px 14px rgba(249, 115, 22, 0.14);
+        }
+
+        .scenario-step-card.is-cleanup {
+            border-left: 3.5px solid #d97706;
+        }
+
+        .scenario-step-card.is-active.is-cleanup {
+            border-color: #d97706;
+            box-shadow: 0 0 0 1px #d97706, 0 4px 14px rgba(217, 119, 6, 0.14);
+        }
+
+        /* 卡片顶部行: 序号 + 方法 + 契约/清理图标 + 右侧悬浮操作群 */
+        .step-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .step-card-header-left {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-card-num {
+            font-size: 10px;
+            font-weight: 700;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 1px 4px;
+            border-radius: 3px;
+            line-height: 1.2;
+        }
+
+        .scenario-step-card.is-active .step-card-num {
+            background: #ffedd5;
+            color: #c2410c;
+        }
+
+        /* 卡片悬浮工具条 (渐进式披露: 默认隐蔽，移入卡片时显现，不干扰日常查看) */
+        .step-card-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            opacity: 0;
+            transition: opacity 0.18s ease;
+        }
+
+        .scenario-step-card:hover .step-card-actions {
+            opacity: 1;
+        }
+
+        .step-card-action-btn {
+            width: 19px;
+            height: 19px;
+            border-radius: 3px;
+            border: none;
+            background: #f8fafc;
+            color: #94a3b8;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+            transition: all 0.12s ease;
+            padding: 0;
+        }
+
+        .step-card-action-btn:hover:not(:disabled) {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .step-card-action-btn.danger:hover:not(:disabled) {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .step-card-action-btn:disabled {
+            opacity: 0.25;
+            cursor: not-allowed;
+        }
+
+        /* 卡片主体: 名称与路径 */
+        .step-card-body {
+            flex: 1;
+            min-width: 0;
+            margin-bottom: 4px;
+        }
+
+        .step-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0f172a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 3px;
+            line-height: 1.3;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .step-card-name span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-name-edit-icon {
+            font-size: 10px;
+            color: #94a3b8;
+            opacity: 0;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .scenario-step-card:hover .step-name-edit-icon {
+            opacity: 0.8;
+        }
+
+        .step-name-edit-icon:hover {
+            color: #f97316 !important;
+            opacity: 1 !important;
+        }
+
+        .step-name-input {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0f172a;
+            width: 100%;
+            padding: 0 0 2px 0;
+            margin-bottom: 3px;
+            border: none;
+            border-bottom: 1.5px solid #f97316;
+            background: transparent;
+            outline: none;
+            font-family: inherit;
+            line-height: 1.3;
+            box-sizing: border-box;
+        }
+
+        .step-card-path {
+            font-size: 10.5px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            color: #475569;
+            background: #f8fafc;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            border: 1px solid #f1f5f9;
+        }
+
+        /* 卡片底部结果/信息栏 */
+        .step-card-footer {
+            margin-top: 4px;
+            padding-top: 4px;
+            border-top: 1px dashed #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #94a3b8;
+            min-height: 18px;
+        }
+
+        .step-active-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f97316;
+            flex-shrink: 0;
+            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+        }
+
+        /* 节点间连接器: 默认平滑箭头导引线，悬浮平滑呈现 (+) 按钮 */
+        .step-connector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            padding: 0 4px;
+            flex-shrink: 0;
+            width: 30px;
+        }
+
+        .step-connector-line {
+            height: 1.5px;
+            background: #cbd5e1;
+            flex: 1;
+            transition: background 0.15s ease;
+        }
+
+        .step-connector:hover .step-connector-line {
+            background: #fdba74;
+        }
+
+        .step-connector-arrow {
+            color: #94a3b8;
+            font-size: 11px;
+            margin-left: -2px;
+            transition: color 0.15s ease;
+        }
+
+        .step-connector:hover .step-connector-arrow {
+            color: #f97316;
+        }
+
+        .step-connector-add-btn {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 1.5px solid #cbd5e1;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            cursor: pointer;
+            transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1;
+            opacity: 0.45;
+        }
+
+        .step-connector:hover .step-connector-add-btn {
+            opacity: 1;
+            border-color: #fdba74;
+            color: #ea580c;
+            transform: scale(1.15);
+            box-shadow: 0 2px 6px rgba(249, 115, 22, 0.25);
+        }
+
+        .step-connector-add-btn:hover {
+            background: #f97316 !important;
+            color: #ffffff !important;
+            border-color: #ea580c !important;
+        }
+
+        /* 尾部添加节点卡片 */
+        .step-add-card {
+            min-width: 110px;
+            border: 1.5px dashed #cbd5e1;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            cursor: pointer;
+            color: #64748b;
+            transition: all 0.18s ease;
+            flex-shrink: 0;
+            padding: 10px 12px;
+            background: #ffffff;
+        }
+
+        .step-add-card:hover {
+            border-color: #f97316;
+            color: #ea580c;
+            background: #fffaf5;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(249, 115, 22, 0.1);
         }
 
