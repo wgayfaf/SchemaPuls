@@ -186,23 +186,26 @@
                                         }}</span>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="200" align="center" fixed="right">
+                            <el-table-column label="操作" width="220" align="center" fixed="right">
                                 <template #default="{ row }">
-                                    <div class="machine-action-grid">
-                                        <el-button size="small" type="success" plain
+                                    <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; width: 190px; margin: 0 auto;">
+                                        <el-button size="small" type="success" plain style="flex: 1 1 45%; margin: 0; padding: 4px 6px; height: 28px;"
                                             :loading="triggeringMachineId === row.id" @click="handleTriggerMachine(row)">
                                             <i class="fa-solid fa-bolt" style="margin-right: 4px;"></i>探活
                                         </el-button>
-                                        <el-button size="small" type="warning" plain @click="openPostmanImportForMachine(row)" title="从 Postman 集合或 ZIP 压缩包导入接口到该机器">
-                                            <i class="fa-solid fa-file-import" style="margin-right: 4px;"></i>导入接口
+                                        <el-button size="small" type="warning" plain style="flex: 1 1 45%; margin: 0; padding: 4px 6px; height: 28px;" @click="openPostmanImportForMachine(row)" title="从 Postman 集合或 ZIP 压缩包导入接口到该机器">
+                                            <i class="fa-solid fa-file-import" style="margin-right: 4px;"></i>导入
                                         </el-button>
-                                        <el-button size="small" type="primary" plain @click="openEditMachineDialog(row)">
+                                        <el-button size="small" type="info" plain style="flex: 1 1 45%; margin: 0; padding: 4px 6px; height: 28px;" @click="openMachineDbDrawer(row)" title="管理该机器关联的目标数据库 (支持数据准备与自动销毁)">
+                                            <i class="fa-solid fa-database" style="margin-right: 4px;"></i>数据库
+                                        </el-button>
+                                        <el-button size="small" type="primary" plain style="flex: 1 1 20%; margin: 0; padding: 4px 6px; height: 28px;" @click="openEditMachineDialog(row)">
                                             <i class="fa-solid fa-pen-to-square" style="margin-right: 4px;"></i>编辑
                                         </el-button>
                                         <el-popconfirm :title="'确定删除机器 [' + row.name + '] 吗？'" confirm-button-text="确定"
                                             cancel-button-text="取消" @confirm="handleDeleteMachine(row.id, row.name)">
                                             <template #reference>
-                                                <el-button size="small" type="danger" plain>
+                                                <el-button size="small" type="danger" plain style="flex: 1 1 20%; margin: 0; padding: 4px 6px; height: 28px;">
                                                     <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除
                                                 </el-button>
                                             </template>
@@ -266,6 +269,155 @@
         <el-button type="primary" @click="submitMachineForm" :loading="machineSubmitting">
             {{ editingMachineId ? '保存修改' : '确认接入' }}
         </el-button>
+    </template>
+</el-dialog>
+
+<!-- 机器关联数据库管理抽屉 -->
+<el-drawer v-model="machineDbDrawerVisible" :title="'目标数据库管理 - ' + (currentMachineForDb ? currentMachineForDb.name : '')" size="680px" destroy-on-close>
+    <div style="padding: 0 4px;">
+        <!-- 头部提示卡片 -->
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <div style="font-weight: 600; color: #1e293b; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-database" style="color: #3b82f6;"></i>
+                        <span>{{ currentMachineForDb?.name }}</span>
+                        <el-tag size="small" type="info">{{ currentMachineForDb?.host }}:{{ currentMachineForDb?.port }}</el-tag>
+                    </div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+                        配置该机器关联的数据库凭据。在接口编辑中启用“环境准备”后，系统将在每次执行前自动写入测试数据并导出主键变量，执行后自动回滚销毁。
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <el-button size="small" type="primary" @click="openCreateDbDialog">
+                        <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加数据库
+                    </el-button>
+                    <el-button size="small" plain @click="fetchMachineDbs(currentMachineForDb.id)" :loading="loadingMachineDbs">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </el-button>
+                </div>
+            </div>
+            <div style="margin-top: 10px; display: flex; gap: 16px; font-size: 12px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
+                <span><i class="fa-solid fa-shield-halved" style="color: #10b981; margin-right: 4px;"></i>独立受控连接池 (Max Connections 复用保护)</span>
+                <span><i class="fa-solid fa-rotate-left" style="color: #f59e0b; margin-right: 4px;"></i>执行后保证清理防污染</span>
+            </div>
+        </div>
+
+        <!-- 数据库列表表格 -->
+        <el-table :data="machineDbList" v-loading="loadingMachineDbs" style="width: 100%" empty-text="暂无数据库配置，点击右上角添加">
+            <el-table-column prop="name" label="配置别名" min-width="130">
+                <template #default="{ row }">
+                    <div style="font-weight: 600; color: #1e293b;">{{ row.name }}</div>
+                    <el-tag size="small" type="success" effect="plain" style="font-size: 10px; height: 18px; margin-top: 2px;">
+                        {{ (row.db_type || 'postgresql').toUpperCase() }}
+                    </el-tag>
+                </template>
+            </el-table-column>
+            <el-table-column label="连接目标" min-width="180">
+                <template #default="{ row }">
+                    <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0284c7;">
+                        {{ row.host }}:{{ row.port }}
+                    </div>
+                    <div style="font-size: 11.5px; color: #64748b;">
+                        库名: <span style="font-weight: 500; color: #334155;">{{ row.database }}</span> / 用户: {{ row.username }}
+                    </div>
+                </template>
+            </el-table-column>
+            <el-table-column prop="pool_size" label="连接池上限" width="100" align="center">
+                <template #default="{ row }">
+                    <el-tag size="small" type="info">{{ row.pool_size || 10 }} Conns</el-tag>
+                </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180" align="center">
+                <template #default="{ row }">
+                    <el-button size="small" type="success" plain @click="handleTestDbConnection(row)" :loading="testingDb">
+                        测试
+                    </el-button>
+                    <el-button size="small" type="primary" plain @click="openEditDbDialog(row)">
+                        编辑
+                    </el-button>
+                    <el-popconfirm :title="'确定删除数据库配置 [' + row.name + '] 吗？'" @confirm="handleDeleteDb(row.id, row.name)">
+                        <template #reference>
+                            <el-button size="small" type="danger" plain>删除</el-button>
+                        </template>
+                    </el-popconfirm>
+                </template>
+            </el-table-column>
+        </el-table>
+    </div>
+</el-drawer>
+
+<!-- 添加/编辑数据库配置弹窗 -->
+<el-dialog v-model="dbDialogVisible" :title="editingDbId ? '编辑目标数据库配置' : '接入目标数据库配置'" width="560px" destroy-on-close append-to-body>
+    <el-form :model="dbForm" label-width="110px">
+        <el-form-item label="配置别名" required>
+            <el-input v-model="dbForm.name" placeholder="例如: 业务核心PostgreSQL主库"></el-input>
+        </el-form-item>
+        <el-form-item label="数据库类型" required>
+            <el-select v-model="dbForm.db_type" disabled style="width: 100%;">
+                <el-option label="PostgreSQL (支持表结构探查与 Mock 准备)" value="postgresql"></el-option>
+            </el-select>
+        </el-form-item>
+        <el-row :gutter="12">
+            <el-col :span="16">
+                <el-form-item label="主机/IP" required>
+                    <el-input v-model="dbForm.host" placeholder="例如: 127.0.0.1 或 postgres"></el-input>
+                </el-form-item>
+            </el-col>
+            <el-col :span="8">
+                <el-form-item label="端口" required label-width="60px">
+                    <el-input-number v-model="dbForm.port" :min="1" :max="65535" style="width: 100%;"></el-input-number>
+                </el-form-item>
+            </el-col>
+        </el-row>
+        <el-form-item label="数据库名" required>
+            <el-input v-model="dbForm.database" placeholder="例如: postgres 或 my_app"></el-input>
+        </el-form-item>
+        <el-row :gutter="12">
+            <el-col :span="12">
+                <el-form-item label="用户名" required>
+                    <el-input v-model="dbForm.username" placeholder="例如: postgres"></el-input>
+                </el-form-item>
+            </el-col>
+            <el-col :span="12">
+                <el-form-item label="密码" label-width="70px">
+                    <el-input v-model="dbForm.password" type="password" show-password placeholder="数据库密码"></el-input>
+                </el-form-item>
+            </el-col>
+        </el-row>
+        <el-row :gutter="12">
+            <el-col :span="12">
+                <el-form-item label="连接池上限">
+                    <el-input-number v-model="dbForm.pool_size" :min="1" :max="20" style="width: 100%;"></el-input-number>
+                </el-form-item>
+            </el-col>
+            <el-col :span="12">
+                <el-form-item label="SSL 模式" label-width="80px">
+                    <el-select v-model="dbForm.ssl_mode" style="width: 100%;">
+                        <el-option label="prefer (推荐)" value="prefer"></el-option>
+                        <el-option label="disable" value="disable"></el-option>
+                        <el-option label="require" value="require"></el-option>
+                    </el-select>
+                </el-form-item>
+            </el-col>
+        </el-row>
+        <div style="background: #f1f5f9; padding: 8px 12px; border-radius: 6px; font-size: 11.5px; color: #475569; line-height: 1.5; margin-bottom: 10px;">
+            <i class="fa-solid fa-lightbulb" style="color: #f59e0b; margin-right: 4px;"></i>
+            <strong>并发保护机制：</strong>系统采用单例受控连接池，定时调度高频拨测时自动复用既有连接，单个配置最多占用所设数量连接，避免突发激增导致数据库挂起。
+        </div>
+    </el-form>
+    <template #footer>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <el-button type="success" plain @click="handleTestDbConnection(dbForm)" :loading="testingDb">
+                <i class="fa-solid fa-plug" style="margin-right: 4px;"></i>测试连接
+            </el-button>
+            <div style="display: flex; gap: 8px;">
+                <el-button @click="dbDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="handleSaveDbForm" :loading="savingDb">
+                    {{ editingDbId ? '保存修改' : '确认接入' }}
+                </el-button>
+            </div>
+        </div>
     </template>
 </el-dialog>
 </template>

@@ -68,6 +68,7 @@ def list_apis(
             "schema_configured": bool(a.expected_schema),
             "pre_actions": a.pre_actions or [],
             "post_actions": a.post_actions or [],
+            "db_fixture": a.db_fixture,
             "cron_interval_minutes": a.cron_interval_minutes,
             "is_active": a.is_active,
             "retry_threshold": a.retry_threshold,
@@ -104,118 +105,235 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
     env = session.get(Environment, grp.environment_id) if grp and grp.environment_id else None
     env_vars = dict(env.variables or {}) if env and env.variables else {}
 
-    auth_token = None
-    if data.auth_type == "bearer":
-        auth_token = data.auth_config.get("token")
+    # 【DB Fixture 插件: 前置数据准备 (必须完全入库成功后才允许执行接口)】
+    from app.plugins.db_fixture.executor import prepare_db_fixture, cleanup_db_fixture
+    fixture_ctx = None
+    if data.db_fixture and data.db_fixture.get("enabled"):
+        fixture_ctx = await prepare_db_fixture(data.db_fixture, session)
+        if fixture_ctx and not fixture_ctx.is_success:
+            # 严格前置屏障：数据准备失败严禁发起接口请求，防止无数据空跑
+            tables_summary = [
+                {
+                    "table_name": t.table_name,
+                    "primary_key_column": t.primary_key_column,
+                    "primary_key_value": t.primary_key_value,
+                    "inserted_record": t.inserted_record,
+                    "variables": t.variables,
+                    "is_success": t.is_success,
+                    "prepare_message": t.prepare_message,
+                    "cleanup_done": t.cleanup_done,
+                    "cleanup_message": t.cleanup_message,
+                    "error": t.error
+                }
+                for t in getattr(fixture_ctx, "tables", [])
+            ]
+            db_fixture_summary = {
+                "enabled": True,
+                "success": False,
+                "is_success": False,
+                "database_id": fixture_ctx.database_id,
+                "database_name": fixture_ctx.database_name,
+                "table_name": fixture_ctx.table_name,
+                "primary_key_column": fixture_ctx.primary_key_column,
+                "primary_key_value": fixture_ctx.primary_key_value,
+                "inserted_record": fixture_ctx.inserted_record,
+                "variables": {},
+                "exported_variables": {},
+                "tables": tables_summary,
+                "prepare_message": fixture_ctx.prepare_message,
+                "cleaned_up": fixture_ctx.cleanup_done,
+                "cleanup_done": fixture_ctx.cleanup_done,
+                "cleanup_message": fixture_ctx.cleanup_message,
+                "error": fixture_ctx.error_message
+            }
+            return {
+                "status_code": 0,
+                "latency_ms": 0,
+                "is_ok": False,
+                "error_message": f"前置环境准备失败: {fixture_ctx.error_message} (已熔断拦截，未调用接口)",
+                "response_data": {
+                    "error": f"数据库前置环境准备写入失败: {fixture_ctx.error_message}",
+                    "detail": "为保障测试数据一致性与业务安全性，系统在检测到前置数据写入失败时已自动熔断短路，阻止了接口请求的发出。"
+                },
+                "response_headers": {},
+                "response_text": None,
+                "schema_matched": False,
+                "schema_configured": False,
+                "schema_errors": [],
+                "assertions_summary": {"all_passed": False, "total": 0, "passed_count": 0},
+                "assertions_result": [],
+                "extracted_variables": {},
+                "environment": {
+                    "id": env.id if env else None,
+                    "name": env.name if env else "默认环境",
+                    "variables": env_vars,
+                    "updated_variables": {}
+                },
+                "request_url": "",
+                "resolved_url": "",
+                "rendered_headers": {},
+                "rendered_params": {},
+                "rendered_body": None,
+                "script_error": None,
+                "console_logs": [],
+                "db_fixture": db_fixture_summary
+            }
+        elif fixture_ctx and fixture_ctx.variables:
+            env_vars.update(fixture_ctx.variables)
 
-    from app.services.template_engine import (
-        parse_params_to_dict, parse_headers_to_dict, render_macro_string, resolve_path_variables
-    )
+    try:
+        auth_token = None
+        if data.auth_type == "bearer":
+            auth_token = data.auth_config.get("token")
 
-    req_headers = parse_headers_to_dict(data.http_headers, auth_token=auth_token)
-    if data.auth_type == "bearer" and auth_token:
-        if "authorization" not in [k.lower() for k in req_headers]:
-            req_headers["Authorization"] = f"Bearer {auth_token}"
-    elif data.auth_type == "basic":
-        u = data.auth_config.get("username", "")
-        p = data.auth_config.get("password", "")
-        if u or p:
-            import base64
-            b64_val = base64.b64encode(f"{u}:{p}".encode()).decode()
-            if "authorization" not in [k.lower() for k in req_headers]:
-                req_headers["Authorization"] = f"Basic {b64_val}"
-    elif data.auth_type == "custom_header":
-        hk = (data.auth_config or {}).get("header_key", "").strip()
-        hv = (data.auth_config or {}).get("header_value", "")
-        if hk and hk.lower() not in [k.lower() for k in req_headers]:
-            req_headers[hk] = hv
-
-    raw_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
-    rendered_body = render_macro_string(data.http_body, auth_token=auth_token) if data.http_body else None
-
-    rendered_path = render_macro_string(data.http_path, auth_token=auth_token)
-    if not rendered_path.startswith("/"):
-        rendered_path = "/" + rendered_path
-
-    # 解析并替换路径参数 (如 /detail/{tableId} 或 /detail/:tableId)
-    # 将已被替换进路径的参数从 req_params 中剔除，防止被拼接成查询字符串
-    rendered_path, req_params = resolve_path_variables(rendered_path, raw_params, env_vars)
-
-    # 执行【前置操作 (Pre-request Actions)】
-    from app.services.action_engine import execute_pre_actions, execute_post_actions
-    final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
-        pre_actions=data.pre_actions,
-        headers=req_headers,
-        params=req_params,
-        body=rendered_body,
-        path=rendered_path,
-        auth_token=auth_token,
-        environment_variables=env_vars
-    )
-
-    # 前置操作若动态生成了变量或修改了参数，进行二次路径变量安全兜底解析
-    final_path, final_params = resolve_path_variables(final_path, final_params, variables)
-
-    if not final_path.startswith("/"):
-        final_path = "/" + final_path
-
-    effective_base = data.base_url or (machine.base_url if machine else None)
-    if effective_base and effective_base.strip():
-        url = f"{effective_base.strip().rstrip('/')}{final_path}"
-    else:
-        scheme = "https" if machine.port == 443 else "http"
-        url = (
-            f"{scheme}://{machine.host}:{machine.port}{final_path}"
-            if machine.port not in [80, 443]
-            else f"{scheme}://{machine.host}{final_path}"
+        from app.services.template_engine import (
+            parse_params_to_dict, parse_headers_to_dict, render_macro_string, resolve_path_variables
         )
 
-    from app.services.probe_service import check_http_detailed
-    http_ok, http_code, http_ms, json_data, http_err, resp_headers, resp_text = await check_http_detailed(
-        url,
-        method=data.http_method,
-        headers=final_headers,
-        params=final_params if final_params else None,
-        body=final_body,
-        body_type=data.http_body_type
-    )
+        req_headers = parse_headers_to_dict(data.http_headers, auth_token=auth_token)
+        if data.auth_type == "bearer" and auth_token:
+            if "authorization" not in [k.lower() for k in req_headers]:
+                req_headers["Authorization"] = f"Bearer {auth_token}"
+        elif data.auth_type == "basic":
+            u = data.auth_config.get("username", "")
+            p = data.auth_config.get("password", "")
+            if u or p:
+                import base64
+                b64_val = base64.b64encode(f"{u}:{p}".encode()).decode()
+                if "authorization" not in [k.lower() for k in req_headers]:
+                    req_headers["Authorization"] = f"Basic {b64_val}"
+        elif data.auth_type == "custom_header":
+            hk = (data.auth_config or {}).get("header_key", "").strip()
+            hv = (data.auth_config or {}).get("header_value", "")
+            if hk and hk.lower() not in [k.lower() for k in req_headers]:
+                req_headers[hk] = hv
 
-    schema_matched = None
-    schema_errors = []
-    schema_configured = bool(data.expected_schema)
-    if data.expected_schema and isinstance(data.expected_schema, dict):
-        if json_data is not None:
-            schema_matched, schema_errors = check_schema(json_data, data.expected_schema)
+        raw_params = parse_params_to_dict(data.http_params, auth_token=auth_token)
+        rendered_body = render_macro_string(data.http_body, auth_token=auth_token) if data.http_body else None
+
+        rendered_path = render_macro_string(data.http_path, auth_token=auth_token)
+        if not rendered_path.startswith("/"):
+            rendered_path = "/" + rendered_path
+
+        # 解析并替换路径参数 (如 /detail/{tableId} 或 /detail/:tableId)
+        # 将已被替换进路径的参数从 req_params 中剔除，防止被拼接成查询字符串
+        rendered_path, req_params = resolve_path_variables(rendered_path, raw_params, env_vars)
+
+        # 执行【前置操作 (Pre-request Actions)】
+        from app.services.action_engine import execute_pre_actions, execute_post_actions
+        final_headers, final_params, final_body, final_path, variables, pre_updated_env = execute_pre_actions(
+            pre_actions=data.pre_actions,
+            headers=req_headers,
+            params=req_params,
+            body=rendered_body,
+            path=rendered_path,
+            auth_token=auth_token,
+            environment_variables=env_vars
+        )
+
+        # 前置操作若动态生成了变量或修改了参数，进行二次路径变量安全兜底解析
+        final_path, final_params = resolve_path_variables(final_path, final_params, variables)
+
+        if not final_path.startswith("/"):
+            final_path = "/" + final_path
+
+        effective_base = data.base_url or (machine.base_url if machine else None)
+        if effective_base and effective_base.strip():
+            url = f"{effective_base.strip().rstrip('/')}{final_path}"
         else:
-            schema_matched = False
-            schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
+            scheme = "https" if machine.port == 443 else "http"
+            url = (
+                f"{scheme}://{machine.host}:{machine.port}{final_path}"
+                if machine.port not in [80, 443]
+                else f"{scheme}://{machine.host}{final_path}"
+            )
 
-    # 执行【后置操作 (Post-response Actions / Assertions)】
-    all_assertions_passed, assertions_result, extracted_vars, post_updated_env = execute_post_actions(
-        post_actions=data.post_actions,
-        status_code=http_code,
-        latency_ms=http_ms,
-        response_headers=resp_headers,
-        response_data=json_data,
-        response_text=resp_text,
-        context_variables=variables,
-        environment_variables=env_vars
-    )
+        from app.services.probe_service import check_http_detailed
+        http_ok, http_code, http_ms, json_data, http_err, resp_headers, resp_text = await check_http_detailed(
+            url,
+            method=data.http_method,
+            headers=final_headers,
+            params=final_params if final_params else None,
+            body=final_body,
+            body_type=data.http_body_type
+        )
 
-    # 同步环境变量更新并持久化到数据库
-    all_updated_env = {}
-    all_updated_env.update(pre_updated_env)
-    all_updated_env.update(post_updated_env)
-    if all_updated_env and env:
-        from sqlalchemy.orm.attributes import flag_modified
-        current_vars = dict(env.variables or {})
-        current_vars.update(all_updated_env)
-        env.variables = current_vars
-        flag_modified(env, "variables")
-        session.add(env)
-        session.commit()
-        session.refresh(env)
-        env_vars = current_vars
+        schema_matched = None
+        schema_errors = []
+        schema_configured = bool(data.expected_schema)
+        if data.expected_schema and isinstance(data.expected_schema, dict):
+            if json_data is not None:
+                schema_matched, schema_errors = check_schema(json_data, data.expected_schema)
+            else:
+                schema_matched = False
+                schema_errors = [{"field": "$root", "validator": "empty", "message": http_err or "未收到有效 JSON 响应"}]
+
+        # 执行【后置操作 (Post-response Actions / Assertions)】
+        all_assertions_passed, assertions_result, extracted_vars, post_updated_env = execute_post_actions(
+            post_actions=data.post_actions,
+            status_code=http_code,
+            latency_ms=http_ms,
+            response_headers=resp_headers,
+            response_data=json_data,
+            response_text=resp_text,
+            context_variables=variables,
+            environment_variables=env_vars
+        )
+
+        # 同步环境变量更新并持久化到数据库
+        all_updated_env = {}
+        all_updated_env.update(pre_updated_env)
+        all_updated_env.update(post_updated_env)
+        if all_updated_env and env:
+            from sqlalchemy.orm.attributes import flag_modified
+            current_vars = dict(env.variables or {})
+            current_vars.update(all_updated_env)
+            env.variables = current_vars
+            flag_modified(env, "variables")
+            session.add(env)
+            session.commit()
+            session.refresh(env)
+            env_vars = current_vars
+    finally:
+        # 【DB Fixture 插件: 后置数据自动清理 (无论成功/失败/异常均保证执行)】
+        if fixture_ctx:
+            await cleanup_db_fixture(fixture_ctx, session)
+
+    db_fixture_summary = None
+    if fixture_ctx:
+        tables_summary = []
+        for t in getattr(fixture_ctx, "tables", []):
+            tables_summary.append({
+                "table_name": t.table_name,
+                "primary_key_column": t.primary_key_column,
+                "primary_key_value": t.primary_key_value,
+                "inserted_record": t.inserted_record,
+                "variables": t.variables,
+                "is_success": t.is_success,
+                "prepare_message": t.prepare_message,
+                "cleanup_done": t.cleanup_done,
+                "cleanup_message": t.cleanup_message,
+                "error": t.error
+            })
+        db_fixture_summary = {
+            "enabled": fixture_ctx.enabled,
+            "success": fixture_ctx.is_success,
+            "is_success": fixture_ctx.is_success,
+            "database_id": fixture_ctx.database_id,
+            "database_name": fixture_ctx.database_name,
+            "table_name": fixture_ctx.table_name,
+            "primary_key_column": fixture_ctx.primary_key_column,
+            "primary_key_value": fixture_ctx.primary_key_value,
+            "inserted_record": fixture_ctx.inserted_record,
+            "variables": fixture_ctx.variables,
+            "exported_variables": fixture_ctx.variables,
+            "tables": tables_summary,
+            "prepare_message": fixture_ctx.prepare_message,
+            "cleaned_up": fixture_ctx.cleanup_done,
+            "cleanup_done": fixture_ctx.cleanup_done,
+            "cleanup_message": fixture_ctx.cleanup_message,
+            "error": fixture_ctx.error_message
+        }
 
     return {
         "status_code": http_code,
@@ -247,7 +365,8 @@ async def test_run_api(data: ApiTestRunPayload, session: Session = Depends(get_s
         "rendered_params": final_params,
         "rendered_body": final_body,
         "script_error": variables.get("_script_error"),
-        "console_logs": variables.get("_console_logs", [])
+        "console_logs": variables.get("_console_logs", []),
+        "db_fixture": db_fixture_summary
     }
 
 
@@ -272,6 +391,7 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         expected_schema=data.expected_schema,
         pre_actions=data.pre_actions,
         post_actions=data.post_actions,
+        db_fixture=data.db_fixture,
         cron_interval_minutes=data.cron_interval_minutes,
         is_active=data.is_active,
         retry_threshold=data.retry_threshold,
@@ -334,6 +454,7 @@ def create_api(data: ApiPayload, session: Session = Depends(get_session)):
         "expected_schema": api.expected_schema,
         "pre_actions": api.pre_actions or [],
         "post_actions": api.post_actions or [],
+        "db_fixture": api.db_fixture,
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,
         "current_status": api.current_status,
@@ -371,6 +492,7 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
     api.expected_schema = data.expected_schema
     api.pre_actions = data.pre_actions
     api.post_actions = data.post_actions
+    api.db_fixture = data.db_fixture
     api.cron_interval_minutes = data.cron_interval_minutes
     api.is_active = data.is_active
     api.email_receivers = data.email_receivers
@@ -420,6 +542,7 @@ def update_api(id: int, data: ApiPayload, session: Session = Depends(get_session
         "expected_schema": api.expected_schema,
         "pre_actions": api.pre_actions or [],
         "post_actions": api.post_actions or [],
+        "db_fixture": api.db_fixture,
         "cron_interval_minutes": api.cron_interval_minutes,
         "is_active": api.is_active,
         "current_status": api.current_status,
@@ -663,6 +786,7 @@ def get_api_history(
             "schema_matched": r.schema_matched,
             "schema_diff_detail": r.schema_diff_detail,
             "raw_response_snippet": r.raw_response_snippet,
+            "db_fixture_summary": r.db_fixture_summary,
             "is_healthy": r.is_healthy,
             "probed_at": r.probed_at.isoformat() if r.probed_at else None
         })

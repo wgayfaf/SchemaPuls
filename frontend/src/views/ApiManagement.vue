@@ -795,6 +795,240 @@
             </div>
         </el-tab-pane>
 
+        <!-- 5.5 环境准备 (DB Fixture / 目标数据库多表前置级联准备与自动逆序销毁) 标签页 -->
+        <el-tab-pane label="环境准备 (DB)" name="db_fixture">
+            <!-- 顶部启用开关与配置栏 -->
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <el-switch v-model="apiDbFixture.enabled" active-text="启用数据库环境准备 (DB Fixture)" inactive-text="未启用"></el-switch>
+                        <el-tag v-if="apiDbFixture.enabled" size="small" type="success" effect="plain">
+                            <i class="fa-solid fa-plug" style="margin-right: 3px;"></i>已激活前置数据写入
+                        </el-tag>
+                    </div>
+                    <div v-if="apiDbFixture.enabled" style="display: flex; align-items: center; gap: 10px;">
+                        <el-switch v-model="apiDbFixture.auto_cleanup" active-text="执行后自动清理销毁 (防污染)" inactive-text="保留测试数据"></el-switch>
+                    </div>
+                </div>
+
+                <div v-if="apiDbFixture.enabled" style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #cbd5e1;">
+                    <div v-if="availableMachineDbs.length === 0 && !loadingMachineDbsForApi"
+                        style="padding: 10px 14px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 12.5px; color: #b45309; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 15px;"></i>
+                        <span>当前机器节点名下尚未配置目标数据库。请先前往【机器管理】为该节点添加数据库凭据（PostgreSQL）。</span>
+                    </div>
+
+                    <el-row v-else :gutter="14" style="align-items: center;">
+                        <el-col :span="10">
+                            <div style="font-size: 12px; color: #475569; margin-bottom: 4px; font-weight: 600;">目标数据库 (Database):</div>
+                            <el-select v-model="apiDbFixture.database_id" placeholder="选择关联的目标数据库" style="width: 100%;" size="small" :loading="loadingMachineDbsForApi">
+                                <el-option v-for="db in availableMachineDbs" :key="db.id"
+                                    :label="db.name + ' (' + db.database + ' @ ' + db.host + ')'"
+                                    :value="db.id"></el-option>
+                            </el-select>
+                        </el-col>
+                        <el-col :span="14">
+                            <div style="font-size: 12px; color: #64748b; margin-top: 18px; line-height: 1.5;">
+                                <i class="fa-solid fa-circle-nodes" style="color: #3b82f6; margin-right: 4px;"></i>
+                                支持配置多张表按序级联写入，前序表主键与字段可作为外键变量供后序表引用。
+                            </div>
+                        </el-col>
+                    </el-row>
+                </div>
+            </div>
+
+            <!-- 多表配置卡片与表格区域 -->
+            <div v-if="apiDbFixture.enabled && apiDbFixture.database_id">
+                <!-- 多表切换导航标签条 -->
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <div v-for="(tbl, tIdx) in apiDbFixture.tables" :key="tbl.id || tIdx"
+                            @click="activeFixtureTableIndex = tIdx"
+                            :style="{
+                                cursor: 'pointer',
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                fontSize: '12.5px',
+                                fontWeight: activeFixtureTableIndex === tIdx ? '600' : 'normal',
+                                border: activeFixtureTableIndex === tIdx ? '1px solid #3b82f6' : '1px solid #e2e8f0',
+                                background: activeFixtureTableIndex === tIdx ? '#eff6ff' : '#ffffff',
+                                color: activeFixtureTableIndex === tIdx ? '#1d4ed8' : '#475569',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                transition: 'all 0.15s ease'
+                            }">
+                            <span style="display: inline-block; width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; font-size: 11px; font-weight: bold;"
+                                :style="{ background: activeFixtureTableIndex === tIdx ? '#3b82f6' : '#e2e8f0', color: activeFixtureTableIndex === tIdx ? '#fff' : '#64748b' }">
+                                {{ tIdx + 1 }}
+                            </span>
+                            <span>{{ tbl.table_name || '未选数据表' }}</span>
+                            <span v-if="tbl.fields && tbl.fields.length > 0" style="font-size: 11px; opacity: 0.75;">({{ tbl.fields.length }}字段)</span>
+                        </div>
+
+                        <el-button size="small" type="primary" plain @click="addFixtureTable" style="margin-left: 4px;">
+                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加数据表
+                        </el-button>
+                    </div>
+
+                    <!-- 当前选中表的操作栏：上移、下移、删除 -->
+                    <div v-if="activeFixtureTable" style="display: flex; align-items: center; gap: 8px;">
+                        <el-button-group size="small">
+                            <el-button :disabled="activeFixtureTableIndex === 0" @click="moveFixtureTableUp(activeFixtureTableIndex)" title="上移写入顺序">
+                                <i class="fa-solid fa-arrow-up"></i>
+                            </el-button>
+                            <el-button :disabled="activeFixtureTableIndex >= apiDbFixture.tables.length - 1" @click="moveFixtureTableDown(activeFixtureTableIndex)" title="下移写入顺序">
+                                <i class="fa-solid fa-arrow-down"></i>
+                            </el-button>
+                        </el-button-group>
+                        <el-button size="small" type="danger" plain @click="removeFixtureTable(activeFixtureTableIndex)" :disabled="apiDbFixture.tables.length <= 1" title="移除此表">
+                            <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>删除本表
+                        </el-button>
+                    </div>
+                </div>
+
+                <!-- 当前表的操作控制条 (选择表名、探查表结构、智能生成数据) -->
+                <div v-if="activeFixtureTable" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
+                    <el-row :gutter="12" style="align-items: center;">
+                        <el-col :span="9">
+                            <div style="font-size: 12px; color: #475569; margin-bottom: 4px; font-weight: 600;">
+                                数据表名称 (步骤 {{ activeFixtureTableIndex + 1 }}):
+                            </div>
+                            <el-select v-model="activeFixtureTable.table_name" filterable allow-create default-first-option
+                                placeholder="输入或选择数据表名" style="width: 100%;" size="small" :loading="loadingDbTables">
+                                <el-option v-for="t in availableDbTables" :key="t" :label="t" :value="t"></el-option>
+                            </el-select>
+                        </el-col>
+                        <el-col :span="6">
+                            <div style="font-size: 12px; color: #475569; margin-bottom: 4px; font-weight: 600;">主键字段名:</div>
+                            <el-input v-model="activeFixtureTable.primary_key_column" placeholder="主键字段，默认 id" size="small"></el-input>
+                        </el-col>
+                        <el-col :span="9" style="display: flex; gap: 8px; margin-top: 18px;">
+                            <el-button size="small" type="primary" plain @click="handleReadTableSchema(activeFixtureTableIndex)" :loading="readingTableSchema" :disabled="!activeFixtureTable.table_name">
+                                <i class="fa-solid fa-magnifying-glass-chart" style="margin-right: 4px;"></i>探查表结构
+                            </el-button>
+                            <el-button size="small" type="success" plain @click="handleGenerateMockData(activeFixtureTableIndex)" :loading="generatingMockData" :disabled="!activeFixtureTable.table_name">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 4px;"></i>智能生成数据
+                            </el-button>
+                        </el-col>
+                    </el-row>
+
+                    <!-- 前序表导出可用变量快捷引用条 -->
+                    <div v-if="priorFixtureVariables && priorFixtureVariables.length > 0"
+                        style="margin-top: 12px; padding: 8px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; color: #166534;">
+                        <div style="font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-link" style="color: #16a34a;"></i>
+                            <span>前序表已就绪外键变量 (点击可快捷复制宏并在本表字段值中引用):</span>
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <span v-for="item in priorFixtureVariables" :key="item.var_name"
+                                @click="copyText(item.macro)"
+                                :title="'点击复制 ' + item.macro + ' (' + item.desc + ')'"
+                                style="cursor: pointer; background: #ffffff; border: 1px solid #86efac; border-radius: 4px; padding: 2px 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #15803d; display: inline-flex; align-items: center; gap: 4px;">
+                                <i class="fa-regular fa-copy" style="font-size: 10px;"></i>
+                                <code>{{ item.macro }}</code>
+                                <span style="color: #65a30d; font-size: 10px;">({{ item.desc }})</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 当前表字段编辑列表 -->
+                <div v-if="activeFixtureTable">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div style="font-size: 12.5px; font-weight: 600; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-list-check" style="color: #3b82f6;"></i>
+                            <span>【{{ activeFixtureTable.table_name || '当前表' }}】数据写入与变量导出规则</span>
+                            <el-tag v-if="activeFixtureTable.primary_key_column" size="small" type="warning" effect="plain">
+                                主键: {{ activeFixtureTable.primary_key_column }} (逆序销毁依据)
+                            </el-tag>
+                        </div>
+                        <el-button size="small" type="primary" plain @click="addFixtureFieldRow(activeFixtureTableIndex)">
+                            <i class="fa-solid fa-plus" style="margin-right: 4px;"></i>添加字段
+                        </el-button>
+                    </div>
+
+                    <table class="pm-kv-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 45px; text-align: center;">写入</th>
+                                <th style="width: 180px;">字段名 (Column)</th>
+                                <th style="width: 120px;">数据类型</th>
+                                <th style="width: 32%;">写入测试数据 (Value 支持变量宏与前序表ID)</th>
+                                <th style="width: 25%;">导出注入变量名 (可在后续表或接口中引用)</th>
+                                <th style="width: 50px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="!activeFixtureTable.fields || activeFixtureTable.fields.length === 0">
+                                <td colspan="6" style="text-align: center; color: #94a3b8; padding: 24px;">
+                                    <i class="fa-solid fa-database" style="margin-right: 6px; color: #cbd5e1;"></i>
+                                    请点击上方【探查表结构】或【智能生成数据】自动解析表结构并生成测试字段
+                                </td>
+                            </tr>
+                            <tr v-for="(f, fIdx) in activeFixtureTable.fields" :key="fIdx">
+                                <td style="text-align: center;">
+                                    <el-checkbox v-model="f.include_in_insert"></el-checkbox>
+                                </td>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <el-input v-model="f.column_name" placeholder="列名" size="small"></el-input>
+                                        <el-tag v-if="f.is_primary_key" size="small" type="danger" effect="plain" style="font-size: 10px; height: 18px; padding: 0 4px;">PK</el-tag>
+                                        <el-tag v-if="!f.is_nullable && !f.is_primary_key" size="small" type="info" effect="plain" style="font-size: 10px; height: 18px; padding: 0 4px;">REQ</el-tag>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #64748b;">
+                                        {{ f.udt_name || f.data_type || 'varchar' }}
+                                        <span v-if="f.has_default" style="color: #94a3b8; font-size: 10px;" title="数据库已定义默认值/序列">(默认)</span>
+                                    </span>
+                                </td>
+                                <td>
+                                    <el-input v-model="f.value" :placeholder="f.include_in_insert ? '测试写入值 (支持 {{...}} 宏)' : '(跳过写入，使用DB默认/自增)'" size="small" :disabled="!f.include_in_insert"></el-input>
+                                </td>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                        <el-input v-model="f.variable_name" placeholder="如 env_prepared_id" size="small"></el-input>
+                                        <el-button v-if="f.variable_name" size="small" text type="primary" @click="copyEnvVarRef(f.variable_name)" title="复制引用语法 {{...}}">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </el-button>
+                                    </div>
+                                </td>
+                                <td style="text-align: center;">
+                                    <span class="pm-kv-action-btn" title="删除字段" @click="removeFixtureFieldRow(fIdx, activeFixtureTableIndex)">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div style="margin-top: 10px; font-size: 11.5px; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; line-height: 1.6;">
+                        <div style="font-weight: 600; color: #1e293b; margin-bottom: 3px; display: flex; align-items: center; gap: 6px;">
+                            <i class="fa-solid fa-shield-halved" style="color: #2563eb;"></i>
+                            <span>严格串行生命周期保证（先写入入库 ➔ 确认成功后执行接口 ➔ 接口响应后逆序销毁）：</span>
+                        </div>
+                        <div>
+                            <strong>① 前置写入屏障：</strong>系统按表顺序逐张执行 SQL 写入并确认真实落盘，生成的主键与字段立即可作为变量宏引用。<strong>若任一张表写入失败，系统立即自动短路熔断，绝不调用接口，防止无数据空跑</strong>；<br/>
+                            <strong>② 接口探测执行：</strong>仅当所有数据表均已 100% 写入成功后，系统才会发起 HTTP 接口请求，保证接口能实时查询并使用已就绪的测试数据；<br/>
+                            <strong>③ 后置逆序销毁：</strong>接口执行完毕后（无论成功、失败或超时），进入 <code>finally</code> 保护阶段，严格以相反逆序（... ➔ 2 ➔ 1）执行物理 <code>DELETE</code>，彻底杜绝外键约束报错与残留脏数据。
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div v-else-if="apiDbFixture.enabled && !apiDbFixture.database_id" style="text-align: center; color: #94a3b8; padding: 30px 20px;">
+                <i class="fa-solid fa-database" style="font-size: 28px; color: #cbd5e1; margin-bottom: 10px; display: block;"></i>
+                <div style="font-size: 13.5px; font-weight: 500; color: #475569;">请先在上方选择目标数据库</div>
+            </div>
+            <div v-else style="text-align: center; color: #94a3b8; padding: 40px 20px;">
+                <i class="fa-solid fa-database" style="font-size: 32px; color: #cbd5e1; margin-bottom: 12px; display: block;"></i>
+                <div style="font-size: 14px; font-weight: 500; color: #475569; margin-bottom: 6px;">环境准备功能未开启</div>
+                <div style="font-size: 12px; max-width: 500px; margin: 0 auto; line-height: 1.6;">
+                    当某个接口需要依赖前置数据（如查询/修改某条记录，但上游接口不可用）时，可开启“环境准备”，直接向目标数据库的一张或多张表写入级联测试记录，并在接口执行完毕后自动逆序回滚销毁。
+                </div>
+            </div>
+        </el-tab-pane>
+
         <!-- 6. 后置操作 (Post-response / 断言校验) 标签页 -->
         <el-tab-pane label="后置操作" name="post_actions">
             <div class="pm-preset-bar">
@@ -1003,6 +1237,15 @@
                         断言 {{ apiTestResult.assertions_summary.passed_count }}/{{
                         apiTestResult.assertions_summary.total }}
                     </span>
+                    <span v-if="apiTestResult.db_fixture"
+                        :class="apiTestResult.db_fixture.success ? 'pm-badge-schema-ok' : 'pm-badge-schema-err'"
+                        :title="apiTestResult.db_fixture.error || ('DB准备: ' + ((apiTestResult.db_fixture.tables && apiTestResult.db_fixture.tables.length) || 1) + ' 张表已就绪' + (apiTestResult.db_fixture.cleaned_up ? '，已自动逆序清理' : ''))">
+                        <i :class="apiTestResult.db_fixture.success ? 'fa-solid fa-database' : 'fa-solid fa-triangle-exclamation'"></i>
+                        DB准备: {{ apiTestResult.db_fixture.success ? (apiTestResult.db_fixture.cleaned_up ? '已自动清理' : '写入成功') : '写入失败' }}
+                        <span v-if="apiTestResult.db_fixture.tables && apiTestResult.db_fixture.tables.length > 1" style="margin-left: 4px; opacity: 0.85;">
+                            ({{ apiTestResult.db_fixture.tables.length }}表)
+                        </span>
+                    </span>
                 </template>
             </div>
 
@@ -1014,6 +1257,9 @@
                     <el-radio-button label="assertions">
                         断言结果 ({{ apiTestResult.assertions_result ? apiTestResult.assertions_result.length : 0
                         }})
+                    </el-radio-button>
+                    <el-radio-button v-if="apiTestResult.db_fixture" label="db_fixture">
+                        DB环境准备
                     </el-radio-button>
                 </el-radio-group>
                 <el-button size="small" plain @click="copyResponseBody"
@@ -1132,6 +1378,86 @@
                             💡 提示：该环境下的后续接口可直接使用 <code v-pre>{{变量名}}</code> 引用上述变量。
                         </div>
                     </div>
+                </div>
+            </div>
+            <div v-else-if="apiResponseTab === 'db_fixture'" style="padding: 12px 0;">
+                <!-- 顶部总览状态 -->
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: 14px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div style="font-weight: 600; color: #1e293b; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-database" style="color: #3b82f6;"></i>
+                            <span>目标数据库准备状态</span>
+                            <el-tag size="small" :type="apiTestResult.db_fixture.success ? 'success' : 'danger'">
+                                {{ apiTestResult.db_fixture.success ? '准备成功' : '准备失败' }}
+                            </el-tag>
+                            <el-tag v-if="apiTestResult.db_fixture.cleaned_up" size="small" type="info">已自动逆序清理销毁 (LIFO)</el-tag>
+                        </div>
+                        <div style="font-size: 12px; color: #64748b;">
+                            已处理表数量: <strong style="color: #0f172a;">{{ (apiTestResult.db_fixture.tables && apiTestResult.db_fixture.tables.length) || 1 }}</strong>
+                        </div>
+                    </div>
+                    <div v-if="apiTestResult.db_fixture.error" style="color: #ef4444; font-size: 12px; margin-top: 8px;">
+                        <i class="fa-solid fa-triangle-exclamation" style="margin-right: 4px;"></i>错误详情: {{ apiTestResult.db_fixture.error }}
+                    </div>
+                </div>
+
+                <!-- 注入变量清单 -->
+                <div v-if="apiTestResult.db_fixture.exported_variables && Object.keys(apiTestResult.db_fixture.exported_variables).length > 0" style="margin-bottom: 14px;">
+                    <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-key" style="color: #2563eb;"></i>
+                        <span>已导出注入变量池 (供本次接口 URL / Params / Body 引用):</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <div v-for="(val, varName) in apiTestResult.db_fixture.exported_variables" :key="varName"
+                            style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 4px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;">
+                            <code style="color: #2563eb; font-weight: 600;">{{ getVarRef(varName) }}</code>
+                            <span style="color: #64748b;">=</span>
+                            <span style="color: #0f172a; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ val }}</span>
+                            <el-button size="small" link type="primary" @click="copyEnvVarRef(varName)" title="复制引用代码">
+                                <i class="fa-regular fa-copy"></i>
+                            </el-button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 多表详情卡片列表 -->
+                <div v-if="apiTestResult.db_fixture.tables && apiTestResult.db_fixture.tables.length > 0">
+                    <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 8px;">
+                        各表数据准备与逆序清理明细 (按写入顺序展示):
+                    </div>
+                    <div v-for="(tItem, tIdx) in apiTestResult.db_fixture.tables" :key="tIdx"
+                        style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #1e293b;">
+                                <span style="background: #e0f2fe; color: #0284c7; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px;">
+                                    {{ tIdx + 1 }}
+                                </span>
+                                <span>{{ tItem.table_name }}</span>
+                                <el-tag size="small" :type="tItem.is_success ? 'success' : 'danger'">
+                                    {{ tItem.is_success ? '写入成功' : '写入失败' }}
+                                </el-tag>
+                                <el-tag v-if="tItem.cleanup_done" size="small" type="info">已逆序物理删除</el-tag>
+                            </div>
+                            <div style="font-size: 12px; color: #64748b;">
+                                主键: <code>{{ tItem.primary_key_column }}</code> = <strong style="color: #0f172a;">{{ tItem.primary_key_value || '-' }}</strong>
+                            </div>
+                        </div>
+
+                        <div v-if="tItem.error" style="color: #ef4444; font-size: 12px; margin-bottom: 8px;">
+                            <i class="fa-solid fa-triangle-exclamation" style="margin-right: 4px;"></i>{{ tItem.error }}
+                        </div>
+
+                        <div v-if="tItem.inserted_record">
+                            <div style="font-size: 11.5px; color: #64748b; margin-bottom: 4px;">该表写入记录 (接口执行完毕后已清理):</div>
+                            <pre class="pm-response-body" style="margin: 0; max-height: 180px;">{{ JSON.stringify(tItem.inserted_record, null, 2) }}</pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 兼容单表旧版展示 -->
+                <div v-else-if="apiTestResult.db_fixture.inserted_record">
+                    <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px;">本次写入的目标数据库记录 (接口执行完毕后已物理删除):</div>
+                    <pre class="pm-response-body">{{ JSON.stringify(apiTestResult.db_fixture.inserted_record, null, 2) }}</pre>
                 </div>
             </div>
         </div>

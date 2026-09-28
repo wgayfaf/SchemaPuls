@@ -452,4 +452,201 @@ const copyFallback = (text) => {
     document.body.removeChild(textArea);
 };
 
-export { addEnvVarRow, copyEnvVarRef, copyFallback, currentEnvMachines, currentEnvMachinesForKpi, currentMachineEnvironment, editingMachineId, envVariablesList, envVariablesSaving, envVarsDialogVisible, fetchMachineEnvironment, filteredMachines, getMachineApiCount, getVarRef, goToMachineTargets, handleDeleteMachine, handleTriggerMachine, machineDialogVisible, machineEnvAvgTcpLatency, machineEnvOfflineCount, machineEnvOnlineCount, machineEnvTotalCount, machineForm, machineSearchQuery, machineSubmitting, onPathInput, openCreateMachineDialog, openEditMachineDialog, openEnvDialog, removeEnvVarRow, resetBaseUrlToMachine, saveEnvVariables, selectedMachineBaseUrl, selectedMachineDisplayName, selectedMachineEnv, selectedMachineHost, submitMachineForm, triggeringMachineId }
+// ==========================================================
+// 机器关联外部数据库 (DB Fixture / 目标数据库管理)
+// ==========================================================
+const machineDbDrawerVisible = ref(false);
+const currentMachineForDb = ref(null);
+const machineDbList = ref([]);
+const loadingMachineDbs = ref(false);
+const dbDialogVisible = ref(false);
+const editingDbId = ref(null);
+const testingDb = ref(false);
+const savingDb = ref(false);
+
+const dbForm = ref({
+    machine_id: null,
+    name: "",
+    db_type: "postgresql",
+    host: "",
+    port: 5432,
+    database: "",
+    username: "",
+    password: "",
+    ssl_mode: "prefer",
+    pool_size: 10,
+    connect_timeout: 10
+});
+
+const openMachineDbDrawer = async (machine) => {
+    currentMachineForDb.value = machine;
+    machineDbDrawerVisible.value = true;
+    await fetchMachineDbs(machine.id);
+};
+
+const fetchMachineDbs = async (machineId) => {
+    if (!machineId) return;
+    loadingMachineDbs.value = true;
+    try {
+        const res = await axios.get(`/api/machine-databases?machine_id=${machineId}`);
+        machineDbList.value = res.data || [];
+    } catch (err) {
+        ElMessage.error("获取机器数据库列表失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+        loadingMachineDbs.value = false;
+    }
+};
+
+const openCreateDbDialog = () => {
+    editingDbId.value = null;
+    const m = currentMachineForDb.value;
+    dbForm.value = {
+        machine_id: m ? m.id : null,
+        name: m ? `${m.name}-PostgreSQL` : "目标数据库",
+        db_type: "postgresql",
+        host: m ? m.host : "",
+        port: 5432,
+        database: "",
+        username: "postgres",
+        password: "",
+        ssl_mode: "prefer",
+        pool_size: 10,
+        connect_timeout: 10
+    };
+    dbDialogVisible.value = true;
+};
+
+const openEditDbDialog = (row) => {
+    editingDbId.value = row.id;
+    dbForm.value = {
+        machine_id: row.machine_id,
+        name: row.name || "",
+        db_type: row.db_type || "postgresql",
+        host: row.host || "",
+        port: row.port || 5432,
+        database: row.database || "",
+        username: row.username || "",
+        password: row.password || "",
+        ssl_mode: row.ssl_mode || "prefer",
+        pool_size: row.pool_size || 10,
+        connect_timeout: row.connect_timeout || 10
+    };
+    dbDialogVisible.value = true;
+};
+
+const handleTestDbConnection = async (formOverride = null) => {
+    const f = formOverride || dbForm.value;
+    if (!f.host || !f.port || !f.database || !f.username) {
+        ElMessage.warning("请先填写主机、端口、数据库名和用户名！");
+        return;
+    }
+    testingDb.value = true;
+    try {
+        const res = await axios.post("/api/machine-databases/test-connection", {
+            host: f.host.trim(),
+            port: Number(f.port) || 5432,
+            database: f.database.trim(),
+            username: f.username.trim(),
+            password: f.password || "",
+            ssl_mode: f.ssl_mode || "prefer",
+            connect_timeout: Number(f.connect_timeout) || 10
+        });
+        if (res.data.ok) {
+            ElNotification({
+                title: "数据库连接成功",
+                message: `${res.data.message} (${res.data.version ? res.data.version.split(',')[0] : ''})`,
+                type: "success"
+            });
+        }
+    } catch (err) {
+        ElNotification({
+            title: "数据库连接失败",
+            message: err.response?.data?.detail || err.message,
+            type: "error",
+            duration: 6000
+        });
+    } finally {
+        testingDb.value = false;
+    }
+};
+
+const handleSaveDbForm = async () => {
+    const f = dbForm.value;
+    if (!f.name || !f.name.trim()) {
+        ElMessage.warning("请输入数据库配置别名！");
+        return;
+    }
+    if (!f.host || !f.host.trim()) {
+        ElMessage.warning("请输入主机地址！");
+        return;
+    }
+    if (!f.database || !f.database.trim()) {
+        ElMessage.warning("请输入目标数据库名称！");
+        return;
+    }
+    if (!f.username || !f.username.trim()) {
+        ElMessage.warning("请输入数据库用户名！");
+        return;
+    }
+
+    savingDb.value = true;
+    try {
+        const payload = {
+            machine_id: f.machine_id,
+            name: f.name.trim(),
+            db_type: "postgresql",
+            host: f.host.trim(),
+            port: Number(f.port) || 5432,
+            database: f.database.trim(),
+            username: f.username.trim(),
+            password: f.password || "",
+            ssl_mode: f.ssl_mode || "prefer",
+            pool_size: Math.max(1, Math.min(Number(f.pool_size) || 10, 20)),
+            connect_timeout: Number(f.connect_timeout) || 10
+        };
+
+        if (editingDbId.value) {
+            await axios.put(`/api/machine-databases/${editingDbId.value}`, payload);
+            ElMessage.success(`数据库 [${payload.name}] 配置已更新！已自动刷新连接池`);
+        } else {
+            await axios.post("/api/machine-databases", payload);
+            ElMessage.success(`数据库 [${payload.name}] 已添加并接入受控连接池！`);
+        }
+        dbDialogVisible.value = false;
+        if (currentMachineForDb.value) {
+            await fetchMachineDbs(currentMachineForDb.value.id);
+        }
+    } catch (err) {
+        ElMessage.error((editingDbId.value ? "更新数据库失败: " : "添加数据库失败: ") + (err.response?.data?.detail || err.message));
+    } finally {
+        savingDb.value = false;
+    }
+};
+
+const handleDeleteDb = async (dbId, dbName) => {
+    try {
+        await axios.delete(`/api/machine-databases/${dbId}`);
+        ElMessage.success(`数据库 [${dbName}] 已删除，连接池已释放`);
+        if (currentMachineForDb.value) {
+            await fetchMachineDbs(currentMachineForDb.value.id);
+        }
+    } catch (err) {
+        ElMessage.error("删除数据库配置失败: " + (err.response?.data?.detail || err.message));
+    }
+};
+
+export {
+    addEnvVarRow, copyEnvVarRef, copyFallback, currentEnvMachines, currentEnvMachinesForKpi,
+    currentMachineEnvironment, editingMachineId, envVariablesList, envVariablesSaving,
+    envVarsDialogVisible, fetchMachineEnvironment, filteredMachines, getMachineApiCount,
+    getVarRef, goToMachineTargets, handleDeleteMachine, handleTriggerMachine, machineDialogVisible,
+    machineEnvAvgTcpLatency, machineEnvOfflineCount, machineEnvOnlineCount, machineEnvTotalCount,
+    machineForm, machineSearchQuery, machineSubmitting, onPathInput, openCreateMachineDialog,
+    openEditMachineDialog, openEnvDialog, removeEnvVarRow, resetBaseUrlToMachine, saveEnvVariables,
+    selectedMachineBaseUrl, selectedMachineDisplayName, selectedMachineEnv, selectedMachineHost,
+    submitMachineForm, triggeringMachineId,
+    // 数据库管理导出
+    machineDbDrawerVisible, currentMachineForDb, machineDbList, loadingMachineDbs, dbDialogVisible,
+    editingDbId, testingDb, savingDb, dbForm, openMachineDbDrawer, fetchMachineDbs, openCreateDbDialog,
+    openEditDbDialog, handleTestDbConnection, handleSaveDbForm, handleDeleteDb
+}

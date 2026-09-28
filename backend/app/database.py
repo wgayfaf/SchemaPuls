@@ -35,7 +35,8 @@ def init_db():
         Environment, ServiceGroup, MachineNode, ApiProbe,
         MachineProbeHistory, ApiProbeHistory,
         MonitorTarget, ProbeHistory, SmtpConfig,
-        ScenarioProbe, ScenarioProbeHistory
+        ScenarioProbe, ScenarioProbeHistory,
+        MachineDatabase
     )
     # 创建所有四层模型新表以及兼容表
     # 兼容迁移: 老版本场景历史表 (success/failed_step/steps_result 结构, 旧引擎未上线无业务数据) 重建为新结构
@@ -75,6 +76,7 @@ def init_db():
             ("auth_config", "TEXT DEFAULT '{}'"),
             ("pre_actions", "TEXT DEFAULT '[]'"),
             ("post_actions", "TEXT DEFAULT '[]'"),
+            ("db_fixture", "TEXT DEFAULT NULL"),
         ]
         for col_name, col_def in api_columns_to_add:
             try:
@@ -82,6 +84,13 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass  # 若字段已存在则忽略异常
+
+        # api_probe_histories 表新增 db_fixture_summary 列
+        try:
+            conn.execute(text("ALTER TABLE api_probe_histories ADD COLUMN db_fixture_summary TEXT DEFAULT NULL"))
+            conn.commit()
+        except Exception:
+            pass
 
         # smtp_config 表新增全局告警收件人列 (兼容已建表的老库)
         try:

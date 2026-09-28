@@ -19,6 +19,7 @@ class ApiPayload(BaseModel):
     expected_schema: Dict[str, Any]
     pre_actions: List[Dict[str, Any]] = []
     post_actions: List[Dict[str, Any]] = []
+    db_fixture: Optional[Dict[str, Any]] = None
     cron_interval_minutes: int = 5
     is_active: bool = True
     email_receivers: List[str] = []
@@ -41,6 +42,7 @@ class ApiTestRunPayload(BaseModel):
     expected_schema: Optional[Dict[str, Any]] = None
     pre_actions: Optional[List[Dict[str, Any]]] = []
     post_actions: Optional[List[Dict[str, Any]]] = []
+    db_fixture: Optional[Dict[str, Any]] = None
 
 
 class BatchApiIdsPayload(BaseModel):

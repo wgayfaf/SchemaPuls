@@ -295,6 +295,41 @@
                             <pre
                                 style="margin-top: 4px; padding: 6px; background: #ffffff; border: 1px solid #dbe5f0; border-radius: 4px; color: #1e293b; overflow-x: auto;">{{ row.raw_response_snippet }}</pre>
                         </div>
+
+                        <!-- DB 环境准备与销毁流水卡片 -->
+                        <div v-if="row.db_fixture_summary" style="margin-top: 10px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                                <div style="font-weight: 600; font-size: 12px; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+                                    <i class="fa-solid fa-database" style="color: #3b82f6;"></i>
+                                    <span>环境准备 (DB Fixture) 现场流水：</span>
+                                    <el-tag size="small" :type="row.db_fixture_summary.success ? 'success' : 'danger'">
+                                        {{ row.db_fixture_summary.success ? '准备成功' : '准备失败' }}
+                                    </el-tag>
+                                    <el-tag v-if="row.db_fixture_summary.cleaned_up" size="small" type="info">已逆序物理销毁</el-tag>
+                                </div>
+                                <div v-if="row.db_fixture_summary.cleanup_message" style="font-size: 11px; color: #64748b;">
+                                    {{ row.db_fixture_summary.cleanup_message }}
+                                </div>
+                            </div>
+                            <div v-if="row.db_fixture_summary.error" style="color: #ef4444; font-size: 11.5px; margin-bottom: 6px;">
+                                <i class="fa-solid fa-triangle-exclamation" style="margin-right: 4px;"></i>{{ row.db_fixture_summary.error }}
+                            </div>
+                            <div v-if="row.db_fixture_summary.tables && row.db_fixture_summary.tables.length > 0">
+                                <div v-for="(tItem, tIdx) in row.db_fixture_summary.tables" :key="tIdx"
+                                    style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 10px; margin-top: 6px; font-size: 11.5px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span>
+                                            <strong style="color: #0f172a;">{{ tIdx + 1 }}. {{ tItem.table_name }}</strong>
+                                            <span style="color: #64748b; margin-left: 6px;">(主键: {{ tItem.primary_key_column }} = {{ tItem.primary_key_value || '-' }})</span>
+                                        </span>
+                                        <span :style="{ color: tItem.is_success ? '#16a34a' : '#dc2626', fontWeight: 600 }">
+                                            {{ tItem.is_success ? (tItem.cleanup_done ? '✓ 写入成功并已销毁' : '✓ 写入成功') : '✗ 写入失败' }}
+                                        </span>
+                                    </div>
+                                    <pre v-if="tItem.inserted_record" style="margin: 4px 0 0 0; padding: 4px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 3px; max-height: 100px; overflow-y: auto; font-size: 10.5px;">{{ JSON.stringify(tItem.inserted_record, null, 2) }}</pre>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </template>
             </el-table-column>
@@ -307,6 +342,21 @@
                     <span v-else-if="row.tcp_ok" style="color: #059669; font-weight: 500;">✓ {{
                         row.tcp_latency_ms ? row.tcp_latency_ms + 'ms' : '正常' }}</span>
                     <span v-else style="color: #dc2626; font-weight: 500;">✗ 失败</span>
+                </template>
+            </el-table-column>
+            <el-table-column label="DB 准备" width="115" align="center">
+                <template #default="{ row }">
+                    <template v-if="row.db_fixture_summary">
+                        <el-tag v-if="row.db_fixture_summary.success" type="success" size="small" effect="plain"
+                            :title="row.db_fixture_summary.cleanup_message || '前置写入成功，已逆序销毁'">
+                            <i class="fa-solid fa-database" style="margin-right: 3px;"></i>已清理
+                        </el-tag>
+                        <el-tag v-else type="danger" size="small" effect="plain"
+                            :title="row.db_fixture_summary.error || '前置写入失败'">
+                            <i class="fa-solid fa-triangle-exclamation" style="margin-right: 3px;"></i>准备失败
+                        </el-tag>
+                    </template>
+                    <span v-else style="color: var(--text-muted); font-size: 11px;">未启用</span>
                 </template>
             </el-table-column>
             <el-table-column label="HTTP 状态" width="100" align="center">

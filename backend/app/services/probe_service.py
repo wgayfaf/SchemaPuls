@@ -434,6 +434,7 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         api_expected_schema = dict(api.expected_schema or {})
         api_pre_actions = list(api.pre_actions or [])
         api_post_actions = list(api.post_actions or [])
+        api_db_fixture = dict(api.db_fixture) if api.db_fixture else None
         api_retry_threshold = api.retry_threshold or 3
         api_silence_minutes = api.silence_minutes or 30
         prev_status = api.current_status
@@ -466,7 +467,54 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             session.refresh(history)
             return history
 
-    # 3. 机器在线 -> 解析 Postman 请求结构 (鉴权 Token、前置操作、动态宏变量替换、Params/Headers/Body 组装)
+    # 3. 机器在线 -> 【DB Fixture 插件: 前置数据准备】
+    fixture_ctx = None
+    if api_db_fixture and api_db_fixture.get("enabled"):
+        from app.plugins.db_fixture.executor import prepare_db_fixture, cleanup_db_fixture
+        with Session(engine) as f_session:
+            fixture_ctx = await prepare_db_fixture(api_db_fixture, f_session)
+        if fixture_ctx and not fixture_ctx.is_success:
+            # 严格前置屏障：数据准备失败严禁发起接口请求，防止无数据空跑
+            now = datetime.now()
+            fail_summary = {
+                "enabled": True,
+                "success": False,
+                "is_success": False,
+                "database_name": fixture_ctx.database_name,
+                "error": fixture_ctx.error_message,
+                "prepare_message": fixture_ctx.prepare_message,
+                "cleanup_message": fixture_ctx.cleanup_message,
+                "tables": [
+                    {
+                        "table_name": t.table_name,
+                        "primary_key_column": t.primary_key_column,
+                        "primary_key_value": t.primary_key_value,
+                        "is_success": t.is_success,
+                        "cleanup_done": t.cleanup_done,
+                        "error": t.error
+                    }
+                    for t in getattr(fixture_ctx, "tables", [])
+                ]
+            }
+            with Session(engine) as session:
+                history = ApiProbeHistory(
+                    api_id=api_id,
+                    status_code=0,
+                    latency_ms=0.0,
+                    schema_matched=False,
+                    raw_response_snippet=f"[前置环境准备失败熔断] {fixture_ctx.error_message}，已终止发起接口网络请求",
+                    db_fixture_summary=fail_summary,
+                    is_healthy=False,
+                    probed_at=now
+                )
+                session.add(history)
+                session.commit()
+                session.refresh(history)
+                return history
+        elif fixture_ctx and fixture_ctx.variables:
+            env_variables.update(fixture_ctx.variables)
+
+    # 4. 解析 Postman 请求结构 (鉴权 Token、前置操作、动态宏变量替换、Params/Headers/Body 组装)
     auth_token = None
     if api_auth_type == "bearer":
         auth_token = api_auth_config.get("token")
@@ -533,14 +581,21 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         )
 
     # 发起 HTTP 业务请求探测并返回完整上下文
-    http_ok, http_code, http_ms, json_data, http_err, resp_headers, resp_text = await check_http_detailed(
-        url,
-        method=api_http_method,
-        headers=final_headers,
-        params=final_params if final_params else None,
-        body=final_body,
-        body_type=api_http_body_type
-    )
+    try:
+        http_ok, http_code, http_ms, json_data, http_err, resp_headers, resp_text = await check_http_detailed(
+            url,
+            method=api_http_method,
+            headers=final_headers,
+            params=final_params if final_params else None,
+            body=final_body,
+            body_type=api_http_body_type
+        )
+    finally:
+        # 【DB Fixture 插件: 后置数据自动清理 (无论成功/失败/超时均保证执行)】
+        if fixture_ctx:
+            from app.plugins.db_fixture.executor import cleanup_db_fixture
+            with Session(engine) as f_session:
+                await cleanup_db_fixture(fixture_ctx, f_session)
 
     # 执行 Schema 校验 (expected_schema 为空字典时视为"未配置契约", 不参与校验与健康判定)
     schema_configured = bool(api_expected_schema)
@@ -630,6 +685,34 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         api.last_schema_matched = schema_matched
         api.last_probed_at = now
 
+        fixture_summary = None
+        if fixture_ctx:
+            fixture_summary = {
+                "enabled": True,
+                "success": fixture_ctx.is_success,
+                "database_name": fixture_ctx.database_name,
+                "table_name": fixture_ctx.table_name,
+                "primary_key_column": fixture_ctx.primary_key_column,
+                "primary_key_value": fixture_ctx.primary_key_value,
+                "cleaned_up": fixture_ctx.cleanup_done,
+                "error": fixture_ctx.error_message,
+                "prepare_message": fixture_ctx.prepare_message,
+                "cleanup_message": fixture_ctx.cleanup_message,
+                "tables": [
+                    {
+                        "table_name": t.table_name,
+                        "primary_key_column": t.primary_key_column,
+                        "primary_key_value": t.primary_key_value,
+                        "is_success": t.is_success,
+                        "cleanup_done": t.cleanup_done,
+                        "cleanup_message": t.cleanup_message,
+                        "error": t.error,
+                        "inserted_record": t.inserted_record
+                    }
+                    for t in getattr(fixture_ctx, "tables", [])
+                ]
+            }
+
         history = ApiProbeHistory(
             api_probe_id=api.id,
             machine_id=machine_id,
@@ -640,6 +723,7 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             schema_matched=bool(schema_matched) if schema_matched is not None else False,
             schema_diff_detail=schema_errors if schema_errors else None,
             assertions_result=assertions_result if assertions_result else None,
+            db_fixture_summary=fixture_summary,
             raw_response_snippet=raw_snippet,
             is_healthy=is_healthy,
             probed_at=now

@@ -82,6 +82,7 @@ class ApiProbe(SQLModel, table=True):
     expected_schema: Dict[str, Any] = Field(sa_column=Column(JSON)) # Draft-7 JSON Schema
     pre_actions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 前置操作 (变量定义/请求头注入/参数注入/前置脚本)
     post_actions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON)) # 后置操作 (状态码断言/耗时断言/JSONPath断言/变量提取)
+    db_fixture: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON)) # 环境准备 (数据库测试数据插入与执行后清理)
     cron_interval_minutes: int = Field(default=5)
     is_active: bool = Field(default=True)
     
@@ -132,6 +133,7 @@ class ApiProbeHistory(SQLModel, table=True):
     schema_matched: bool = Field(default=False)
     schema_diff_detail: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
     assertions_result: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON)) # 后置操作断言对比明细
+    db_fixture_summary: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON)) # 数据库前置环境准备与销毁流水快照
     raw_response_snippet: Optional[str] = None
     is_healthy: bool = Field(default=False, index=True)
     probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -245,3 +247,7 @@ class SmtpConfig(SQLModel, table=True):
     smtp_enabled: bool = Field(default=True)   # 邮件告警总开关
     alert_receivers: List[str] = Field(default=[], sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# 导出 DB Fixture 插件中的数据库实体以供 SQLModel 统一元数据建表
+from app.plugins.db_fixture.models import MachineDatabase

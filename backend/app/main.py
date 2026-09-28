@@ -23,6 +23,8 @@ from app.routers import (
     topology, environments, groups, machines,
     apis, tools, targets, postman, settings, scenarios,
 )
+from app.plugins.db_fixture.router import router as db_fixture_router
+from app.plugins.db_fixture.pool_manager import db_pool_manager
 
 
 @asynccontextmanager
@@ -32,6 +34,7 @@ async def lifespan(app: FastAPI):
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    await db_pool_manager.close_all()
 
 
 app = FastAPI(
@@ -65,6 +68,7 @@ app.include_router(targets.router)
 app.include_router(postman.router)
 app.include_router(scenarios.router)
 app.include_router(settings.router)
+app.include_router(db_fixture_router)
 
 
 if not _FRONTEND_DIST:

@@ -122,6 +122,307 @@ const apiTestRunning = ref(false);
 
 const apiTestResult = ref(null);
 
+// ==========================================================
+// DB Fixture (目标数据库前置数据准备与执行后自动销毁)
+// ==========================================================
+const createDefaultFixtureTable = () => ({
+    id: 'tbl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    table_name: "",
+    primary_key_column: "id",
+    fields: []
+});
+
+const apiDbFixture = ref({
+    enabled: false,
+    database_id: null,
+    auto_cleanup: true,
+    tables: [createDefaultFixtureTable()]
+});
+
+const activeFixtureTableIndex = ref(0);
+
+const activeFixtureTable = computed(() => {
+    const tbls = apiDbFixture.value.tables;
+    if (!tbls || tbls.length === 0) return null;
+    if (activeFixtureTableIndex.value >= tbls.length) {
+        activeFixtureTableIndex.value = Math.max(0, tbls.length - 1);
+    }
+    return tbls[activeFixtureTableIndex.value] || null;
+});
+
+// 计算在当前选定表之前的所有表所导出的可用变量清单 (供用户一键点击引用至外键字段)
+const priorFixtureVariables = computed(() => {
+    const list = [];
+    const tbls = apiDbFixture.value.tables || [];
+    const currentIdx = activeFixtureTableIndex.value;
+    for (let i = 0; i < currentIdx && i < tbls.length; i++) {
+        const t = tbls[i];
+        const tName = (t.table_name || "").trim();
+        if (tName) {
+            list.push({
+                table_name: tName,
+                var_name: `env_prepared_${tName}_id`,
+                macro: `{{env_prepared_${tName}_id}}`,
+                desc: `${tName} 主键`
+            });
+            list.push({
+                table_name: tName,
+                var_name: `${tName}_id`,
+                macro: `{{${tName}_id}}`,
+                desc: `${tName} 主键别名`
+            });
+        }
+        (t.fields || []).forEach(f => {
+            const vName = (f.variable_name || "").trim();
+            if (vName) {
+                if (!list.some(item => item.var_name === vName)) {
+                    list.push({
+                        table_name: tName,
+                        var_name: vName,
+                        macro: `{{${vName}}}`,
+                        desc: `${tName}.${f.column_name}`
+                    });
+                }
+            }
+        });
+    }
+    return list;
+});
+
+const addFixtureTable = () => {
+    if (!apiDbFixture.value.tables) {
+        apiDbFixture.value.tables = [];
+    }
+    const newTbl = createDefaultFixtureTable();
+    apiDbFixture.value.tables.push(newTbl);
+    activeFixtureTableIndex.value = apiDbFixture.value.tables.length - 1;
+};
+
+const removeFixtureTable = (idx) => {
+    if (!apiDbFixture.value.tables) return;
+    if (apiDbFixture.value.tables.length <= 1) {
+        apiDbFixture.value.tables = [createDefaultFixtureTable()];
+        activeFixtureTableIndex.value = 0;
+        return;
+    }
+    apiDbFixture.value.tables.splice(idx, 1);
+    if (activeFixtureTableIndex.value >= apiDbFixture.value.tables.length) {
+        activeFixtureTableIndex.value = apiDbFixture.value.tables.length - 1;
+    }
+};
+
+const moveFixtureTableUp = (idx) => {
+    if (idx <= 0 || !apiDbFixture.value.tables) return;
+    const item = apiDbFixture.value.tables.splice(idx, 1)[0];
+    apiDbFixture.value.tables.splice(idx - 1, 0, item);
+    activeFixtureTableIndex.value = idx - 1;
+};
+
+const moveFixtureTableDown = (idx) => {
+    if (!apiDbFixture.value.tables || idx >= apiDbFixture.value.tables.length - 1) return;
+    const item = apiDbFixture.value.tables.splice(idx, 1)[0];
+    apiDbFixture.value.tables.splice(idx + 1, 0, item);
+    activeFixtureTableIndex.value = idx + 1;
+};
+
+const getEffectiveDbFixturePayload = () => {
+    if (!apiDbFixture.value.enabled) return null;
+    const validTables = (apiDbFixture.value.tables || []).filter(t => t.table_name && t.table_name.trim());
+    if (validTables.length === 0) return null;
+    const firstTbl = validTables[0];
+    return {
+        enabled: true,
+        database_id: apiDbFixture.value.database_id,
+        auto_cleanup: apiDbFixture.value.auto_cleanup !== false,
+        tables: validTables.map(t => ({
+            id: t.id,
+            table_name: t.table_name.trim(),
+            primary_key_column: t.primary_key_column || "id",
+            fields: t.fields || []
+        })),
+        // 兼容单表旧字段
+        table_name: firstTbl.table_name.trim(),
+        primary_key_column: firstTbl.primary_key_column || "id",
+        fields: firstTbl.fields || []
+    };
+};
+
+const availableMachineDbs = ref([]);
+const loadingMachineDbsForApi = ref(false);
+const availableDbTables = ref([]);
+const loadingDbTables = ref(false);
+const readingTableSchema = ref(false);
+const generatingMockData = ref(false);
+const lastTestRunDbFixture = ref(null);
+
+const loadDbsForMachine = async (machineId) => {
+    if (!machineId) {
+        availableMachineDbs.value = [];
+        return;
+    }
+    loadingMachineDbsForApi.value = true;
+    try {
+        const res = await axios.get(`/api/machine-databases?machine_id=${machineId}`);
+        availableMachineDbs.value = res.data || [];
+        if (availableMachineDbs.value.length > 0) {
+            if (!apiDbFixture.value.database_id || !availableMachineDbs.value.some(d => d.id === apiDbFixture.value.database_id)) {
+                apiDbFixture.value.database_id = availableMachineDbs.value[0].id;
+            }
+            if (apiDbFixture.value.database_id) {
+                await loadTablesForDb(apiDbFixture.value.database_id);
+            }
+        } else {
+            apiDbFixture.value.database_id = null;
+            availableDbTables.value = [];
+        }
+    } catch (err) {
+        console.error("加载机器数据库列表失败:", err);
+        availableMachineDbs.value = [];
+    } finally {
+        loadingMachineDbsForApi.value = false;
+    }
+};
+
+const loadTablesForDb = async (dbId) => {
+    if (!dbId) {
+        availableDbTables.value = [];
+        return;
+    }
+    loadingDbTables.value = true;
+    try {
+        const res = await axios.get(`/api/machine-databases/${dbId}/tables`);
+        availableDbTables.value = res.data.tables || [];
+    } catch (err) {
+        console.error("加载数据库表列表失败:", err);
+        availableDbTables.value = [];
+    } finally {
+        loadingDbTables.value = false;
+    }
+};
+
+const handleReadTableSchema = async (tableIdx = null) => {
+    const idx = tableIdx !== null ? tableIdx : activeFixtureTableIndex.value;
+    const tblObj = apiDbFixture.value.tables && apiDbFixture.value.tables[idx];
+    if (!tblObj) {
+        ElMessage.warning("请选择有效的数据表进行探查！");
+        return;
+    }
+    const dbId = apiDbFixture.value.database_id;
+    const tbl = (tblObj.table_name || "").trim();
+    if (!dbId) {
+        ElMessage.warning("请先选择目标数据库！");
+        return;
+    }
+    if (!tbl) {
+        ElMessage.warning("请输入或选择目标数据表名！");
+        return;
+    }
+    readingTableSchema.value = true;
+    try {
+        const res = await axios.get(`/api/machine-databases/${dbId}/table-schema?table_name=${encodeURIComponent(tbl)}`);
+        const schema = res.data;
+        tblObj.primary_key_column = schema.primary_key_column || "id";
+
+        const existingFieldMap = {};
+        (tblObj.fields || []).forEach(f => {
+            existingFieldMap[f.column_name] = f;
+        });
+
+        const newFields = (schema.columns || []).map(c => {
+            const existing = existingFieldMap[c.column_name];
+            if (existing) {
+                return {
+                    ...existing,
+                    data_type: c.data_type,
+                    udt_name: c.udt_name,
+                    is_primary_key: c.is_primary_key,
+                    is_nullable: c.is_nullable,
+                    has_default: c.has_default
+                };
+            }
+            const isPk = c.is_primary_key;
+            return {
+                column_name: c.column_name,
+                data_type: c.data_type,
+                udt_name: c.udt_name,
+                is_primary_key: isPk,
+                is_nullable: c.is_nullable,
+                has_default: c.has_default,
+                include_in_insert: !isPk && !c.has_default,
+                value: "",
+                variable_name: isPk ? `env_prepared_${tbl}_id` : `env_prepared_${tbl}_${c.column_name}`
+            };
+        });
+        tblObj.fields = newFields;
+        ElMessage.success(`读取表 [${tbl}] 结构成功！共探查到 ${newFields.length} 个字段，主键: ${schema.primary_key_column || '无'}`);
+    } catch (err) {
+        ElMessage.error("探查表结构失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+        readingTableSchema.value = false;
+    }
+};
+
+const handleGenerateMockData = async (tableIdx = null) => {
+    const idx = tableIdx !== null ? tableIdx : activeFixtureTableIndex.value;
+    const tblObj = apiDbFixture.value.tables && apiDbFixture.value.tables[idx];
+    if (!tblObj) {
+        ElMessage.warning("请选择有效的数据表！");
+        return;
+    }
+    const dbId = apiDbFixture.value.database_id;
+    const tbl = (tblObj.table_name || "").trim();
+    if (!dbId) {
+        ElMessage.warning("请先选择目标数据库！");
+        return;
+    }
+    if (!tbl) {
+        ElMessage.warning("请输入或选择目标数据表名！");
+        return;
+    }
+    generatingMockData.value = true;
+    try {
+        const res = await axios.post(`/api/machine-databases/${dbId}/generate-mock-data`, {
+            table_name: tbl
+        });
+        const mock = res.data;
+        tblObj.primary_key_column = mock.primary_key_column || "id";
+        tblObj.fields = mock.fields || [];
+        ElMessage.success(`智能生成成功！已针对 [${tbl}] 各字段类型生成 Mock 测试数据与变量绑定`);
+    } catch (err) {
+        ElMessage.error("生成测试数据失败: " + (err.response?.data?.detail || err.message));
+    } finally {
+        generatingMockData.value = false;
+    }
+};
+
+const addFixtureFieldRow = (tableIdx = null) => {
+    const idx = tableIdx !== null ? tableIdx : activeFixtureTableIndex.value;
+    const tblObj = apiDbFixture.value.tables && apiDbFixture.value.tables[idx];
+    if (!tblObj) return;
+    if (!tblObj.fields) {
+        tblObj.fields = [];
+    }
+    tblObj.fields.push({
+        column_name: "",
+        data_type: "varchar",
+        udt_name: "varchar",
+        is_primary_key: false,
+        is_nullable: true,
+        has_default: false,
+        include_in_insert: true,
+        value: "",
+        variable_name: ""
+    });
+};
+
+const removeFixtureFieldRow = (fieldIdx, tableIdx = null) => {
+    const idx = tableIdx !== null ? tableIdx : activeFixtureTableIndex.value;
+    const tblObj = apiDbFixture.value.tables && apiDbFixture.value.tables[idx];
+    if (tblObj && tblObj.fields) {
+        tblObj.fields.splice(fieldIdx, 1);
+    }
+};
+
 // 全局接口指标 (供 Dashboard 看板使用)
 const healthyApiCount = computed(() => {
     return apiList.value.filter(a => a.current_status === "HEALTHY").length;
@@ -227,10 +528,11 @@ watch([filteredApis, apiPageSize], () => {
     }
 });
 
-// 监听机器选择变动，自动同步更新 Base URL 与该机器归属的环境及变量池
+// 监听机器选择变动，自动同步更新 Base URL 与该机器归属的环境及变量池，并加载机器配置的数据库
 watch(() => apiForm.value.machine_id, (newMId) => {
     if (!newMId) return;
     fetchMachineEnvironment(newMId);
+    loadDbsForMachine(newMId);
     const m = machineList.value.find(item => item.id === newMId);
     if (!m) return;
     if (m.base_url && m.base_url.trim()) {
@@ -238,6 +540,15 @@ watch(() => apiForm.value.machine_id, (newMId) => {
     } else {
         const scheme = m.port === 443 ? "https" : "http";
         apiForm.value.base_url = (m.port === 80 || m.port === 443) ? `${scheme}://${m.host}` : `${scheme}://${m.host}:${m.port}`;
+    }
+});
+
+// 监听环境准备选定的数据库变更，动态刷新其数据表清单
+watch(() => apiDbFixture.value.database_id, (newDbId) => {
+    if (newDbId) {
+        loadTablesForDb(newDbId);
+    } else {
+        availableDbTables.value = [];
     }
 });
 
@@ -627,6 +938,17 @@ const openCreateApiDialog = (defaultMachineId = null) => {
         { enabled: true, name: "HTTP 状态码等于 200", type: "assert_status_code", expression: "", operator: "equals", target_value: "200", description: "" }
     ];
     apiTestResult.value = null;
+    lastTestRunDbFixture.value = null;
+    apiDbFixture.value = {
+        enabled: false,
+        database_id: null,
+        auto_cleanup: true,
+        tables: [createDefaultFixtureTable()]
+    };
+    activeFixtureTableIndex.value = 0;
+    if (mId) {
+        loadDbsForMachine(mId);
+    }
     apiDialogVisible.value = true;
 };
 
@@ -930,6 +1252,51 @@ const openEditApiDialog = (row) => {
         ];
     }
 
+    if (row.db_fixture) {
+        let tables = [];
+        if (Array.isArray(row.db_fixture.tables) && row.db_fixture.tables.length > 0) {
+            tables = row.db_fixture.tables.map(t => ({
+                id: t.id || ('tbl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+                table_name: t.table_name || "",
+                primary_key_column: t.primary_key_column || "id",
+                fields: Array.isArray(t.fields) ? JSON.parse(JSON.stringify(t.fields)) : []
+            }));
+        } else if (row.db_fixture.table_name) {
+            tables = [{
+                id: 'tbl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+                table_name: row.db_fixture.table_name || "",
+                primary_key_column: row.db_fixture.primary_key_column || "id",
+                fields: Array.isArray(row.db_fixture.fields) ? JSON.parse(JSON.stringify(row.db_fixture.fields)) : []
+            }];
+        } else {
+            tables = [createDefaultFixtureTable()];
+        }
+
+        apiDbFixture.value = {
+            enabled: row.db_fixture.enabled !== false,
+            database_id: row.db_fixture.database_id || null,
+            auto_cleanup: row.db_fixture.auto_cleanup !== false,
+            tables: tables
+        };
+        activeFixtureTableIndex.value = 0;
+    } else {
+        apiDbFixture.value = {
+            enabled: false,
+            database_id: null,
+            auto_cleanup: true,
+            tables: [createDefaultFixtureTable()]
+        };
+        activeFixtureTableIndex.value = 0;
+    }
+    lastTestRunDbFixture.value = null;
+    if (row.machine_id) {
+        loadDbsForMachine(row.machine_id).then(() => {
+            if (apiDbFixture.value.database_id) {
+                loadTablesForDb(apiDbFixture.value.database_id);
+            }
+        });
+    }
+
     apiTestResult.value = null;
     apiDialogVisible.value = true;
 };
@@ -989,10 +1356,36 @@ const handleTestRunApi = async () => {
             auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
             expected_schema: parsedSchema,
             pre_actions: apiPreActionsList.value.filter(a => a.enabled),
-            post_actions: apiPostActionsList.value.filter(a => a.enabled)
+            post_actions: apiPostActionsList.value.filter(a => a.enabled),
+            db_fixture: getEffectiveDbFixturePayload()
         };
         const res = await axios.post("/api/apis/test-run", testPayload);
         apiTestResult.value = res.data;
+
+        // 处理数据库前置数据准备结果
+        if (res.data.db_fixture) {
+            lastTestRunDbFixture.value = res.data.db_fixture;
+            if (res.data.db_fixture.success) {
+                const tables = res.data.db_fixture.tables;
+                const tblCount = (tables && tables.length) || 1;
+                const tblNames = (tables && tables.map(t => t.table_name).join(', ')) || res.data.db_fixture.table_name;
+                ElNotification({
+                    title: "前置数据准备成功",
+                    message: `已向 ${tblCount} 张表 [${tblNames}] 写入测试数据${res.data.db_fixture.cleaned_up ? '，接口执行后已自动按逆序清理销毁' : ''}`,
+                    type: "success",
+                    duration: 4000
+                });
+            } else if (res.data.db_fixture.error) {
+                ElNotification({
+                    title: "前置数据准备失败",
+                    message: res.data.db_fixture.error,
+                    type: "error",
+                    duration: 6000
+                });
+            }
+        } else {
+            lastTestRunDbFixture.value = null;
+        }
 
         // 同步更新宿主机器所属环境的环境变量池
         if (res.data.environment) {
@@ -1122,7 +1515,8 @@ const submitApiForm = async () => {
         auth_type: apiAuthType.value,
         auth_config: apiAuthType.value !== "none" ? apiAuthConfig.value : null,
         pre_actions: apiPreActionsList.value.filter(a => a.key || a.value || a.type === 'custom_script' || a.type === 'javascript'),
-        post_actions: apiPostActionsList.value.filter(a => a.type)
+        post_actions: apiPostActionsList.value.filter(a => a.type),
+        db_fixture: getEffectiveDbFixturePayload()
     };
 
     apiSubmitting.value = true;
@@ -1350,4 +1744,8 @@ const openApiMetricsDrawer = async (row) => {
     }
 };
 
-export { activeDefaultHeadersCount, addHeaderRow, addParamRow, addPostActionRow, addPreActionRow, apiActiveTab, apiAuthConfig, apiAuthType, apiBodyText, apiBodyType, apiDialogVisible, apiEnvAvgLatency, apiEnvHealthyCount, apiEnvIssueCount, apiEnvOnlineMachineCount, apiEnvTotalCount, apiForm, apiHeadersList, apiInferring, apiIntervalUnit, apiIntervalValue, apiParamsList, apiPostActionsList, apiPreActionsList, apiResponseTab, apiSampleJson, apiSearchQuery, apiSubmitting, apiTestResult, apiTestRunning, applyPostActionPreset, applyPreActionPreset, avgApiLatency, clearBodyJson, copyResponseBody, copyText, createDefaultHeaders, currentEnvApisForKpi, currentEnvMachineOptions, editingApiId, filteredApis, formatBodyJson, formatIfJson, formatIntervalDisplay, formatSampleJson, formatSchemaJson, getEffectiveHeaders, getIntervalTooltip, handleDeleteApi, handleInferApiSchema, handleTestRunApi, handleTriggerApi, healthyApiCount, inferSchemaFromTestResult, insertMacroToBody, isHeaderOverridden, isSyncingUrlParams, issueApiCount, minifyBodyJson, onPostActionTypeChange, openApiMetricsDrawer, openCreateApiDialog, openEditApiDialog, removeHeaderRow, removeParamRow, removePostActionRow, removePreActionRow, safeFormatJson, safeMinifyJson, selectedApiEnv, selectedApiMachine, selectedApiStatus, setQuickInterval, showDefaultHeaders, submitApiForm, syncParamsToPath, syncPathToParams, systemDefaultHeaders, toggleApiActive, triggeringApiId, selectedApiRows, apiTableRef, isBatchOperating, handleApiSelectionChange, clearApiSelection, handleBatchDeleteApis, handleBatchToggleActive, handleBatchSetInterval, apiCurrentPage, apiPageSize, paginatedApis }
+export {
+    activeDefaultHeadersCount, addHeaderRow, addParamRow, addPostActionRow, addPreActionRow, apiActiveTab, apiAuthConfig, apiAuthType, apiBodyText, apiBodyType, apiDialogVisible, apiEnvAvgLatency, apiEnvHealthyCount, apiEnvIssueCount, apiEnvOnlineMachineCount, apiEnvTotalCount, apiForm, apiHeadersList, apiInferring, apiIntervalUnit, apiIntervalValue, apiParamsList, apiPostActionsList, apiPreActionsList, apiResponseTab, apiSampleJson, apiSearchQuery, apiSubmitting, apiTestResult, apiTestRunning, applyPostActionPreset, applyPreActionPreset, avgApiLatency, clearBodyJson, copyResponseBody, copyText, createDefaultHeaders, currentEnvApisForKpi, currentEnvMachineOptions, editingApiId, filteredApis, formatBodyJson, formatIfJson, formatIntervalDisplay, formatSampleJson, formatSchemaJson, getEffectiveHeaders, getIntervalTooltip, handleDeleteApi, handleInferApiSchema, handleTestRunApi, handleTriggerApi, healthyApiCount, inferSchemaFromTestResult, insertMacroToBody, isHeaderOverridden, isSyncingUrlParams, issueApiCount, minifyBodyJson, onPostActionTypeChange, openApiMetricsDrawer, openCreateApiDialog, openEditApiDialog, removeHeaderRow, removeParamRow, removePostActionRow, removePreActionRow, safeFormatJson, safeMinifyJson, selectedApiEnv, selectedApiMachine, selectedApiStatus, setQuickInterval, showDefaultHeaders, submitApiForm, syncParamsToPath, syncPathToParams, systemDefaultHeaders, toggleApiActive, triggeringApiId, selectedApiRows, apiTableRef, isBatchOperating, handleApiSelectionChange, clearApiSelection, handleBatchDeleteApis, handleBatchToggleActive, handleBatchSetInterval, apiCurrentPage, apiPageSize, paginatedApis,
+    // 环境准备 (DB Fixture) 导出
+    apiDbFixture, activeFixtureTableIndex, activeFixtureTable, priorFixtureVariables, addFixtureTable, removeFixtureTable, moveFixtureTableUp, moveFixtureTableDown, getEffectiveDbFixturePayload, availableMachineDbs, loadingMachineDbsForApi, availableDbTables, loadingDbTables, readingTableSchema, generatingMockData, lastTestRunDbFixture, loadDbsForMachine, loadTablesForDb, handleReadTableSchema, handleGenerateMockData, addFixtureFieldRow, removeFixtureFieldRow
+}
