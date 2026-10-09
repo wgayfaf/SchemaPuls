@@ -69,8 +69,8 @@ def update_smtp_settings(payload: SmtpConfigPayload, session: Session = Depends(
     row.smtp_use_ssl = payload.smtp_use_ssl
     row.smtp_enabled = payload.smtp_enabled
     row.alert_receivers = [r.strip() for r in payload.alert_receivers if r.strip()]
-    from datetime import datetime
-    row.updated_at = datetime.utcnow()
+    from datetime import datetime, timezone
+    row.updated_at = datetime.now(timezone.utc)
     session.add(row)
     session.commit()
     return {"status": "ok", "message": "SMTP 配置已保存"}

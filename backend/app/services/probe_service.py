@@ -4,7 +4,7 @@ import json
 import re
 import platform
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple, List
 import httpx
 from jsonschema import Draft7Validator
@@ -280,7 +280,7 @@ async def execute_machine_probe(machine_id: int) -> MachineProbeHistory:
         tcp_ms = None
         tcp_err = ping_err or "目标主机不可达 (Ping 超时或未响应)"
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # 综合推断判定逻辑:
     # 1. 主机不可达 (Ping 失败) -> 机器判定为 OFFLINE
@@ -355,6 +355,8 @@ async def execute_machine_probe(machine_id: int) -> MachineProbeHistory:
 
                 need_alert = True
                 if last_alert_at:
+                    if getattr(last_alert_at, "tzinfo", None) is None:
+                        last_alert_at = last_alert_at.replace(tzinfo=timezone.utc)
                     elapsed = (now - last_alert_at).total_seconds() / 60.0
                     if elapsed < silence_minutes:
                         need_alert = False
@@ -441,7 +443,7 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
         prev_failures = api.consecutive_failures or 0
         last_alert_at = api.last_alert_at
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # 2. 【核心熔断短路规则】：若宿主机器处于 OFFLINE 状态，直接短路
     if machine_status == "OFFLINE":
@@ -475,7 +477,7 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             fixture_ctx = await prepare_db_fixture(api_db_fixture, f_session)
         if fixture_ctx and not fixture_ctx.is_success:
             # 严格前置屏障：数据准备失败严禁发起接口请求，防止无数据空跑
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             fail_summary = {
                 "enabled": True,
                 "success": False,
@@ -661,6 +663,8 @@ async def execute_api_probe(api_probe_id: int) -> ApiProbeHistory:
             if api.consecutive_failures >= api_retry_threshold:
                 need_alert = True
                 if last_alert_at:
+                    if getattr(last_alert_at, "tzinfo", None) is None:
+                        last_alert_at = last_alert_at.replace(tzinfo=timezone.utc)
                     elapsed = (now - last_alert_at).total_seconds() / 60.0
                     if elapsed < api_silence_minutes:
                         need_alert = False
@@ -783,7 +787,7 @@ async def execute_probe_for_target(target_id: int) -> ProbeHistory:
         schema_errors = [{"field": "$root", "validator": "tcp", "message": tcp_err or "TCP 连接拒绝"}]
 
     is_healthy = bool(tcp_ok and (http_code == 200) and (schema_matched is not False))
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # 持久化结果
     with Session(engine) as session:

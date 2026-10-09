@@ -1,6 +1,6 @@
 """DB Fixture 插件: 数据库管理与 Schema 探查 REST 路由"""
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session, select
@@ -88,7 +88,7 @@ async def update_database(
     db.ssl_mode = data.ssl_mode or "prefer"
     db.pool_size = data.pool_size or 10
     db.connect_timeout = data.connect_timeout or 10
-    db.updated_at = datetime.utcnow()
+    db.updated_at = datetime.now(timezone.utc)
 
     session.add(db)
     session.commit()

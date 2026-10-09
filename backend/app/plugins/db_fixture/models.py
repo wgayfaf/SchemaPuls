@@ -1,8 +1,12 @@
-"""DB Fixture 插件数据模型与 Schema 定义"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlmodel import SQLModel, Field, JSON, Column
 from pydantic import BaseModel
+
+
+def utc_now() -> datetime:
+    """返回带有时区信息的当前时间"""
+    return datetime.now(timezone.utc)
 
 
 class MachineDatabase(SQLModel, table=True):
@@ -21,8 +25,8 @@ class MachineDatabase(SQLModel, table=True):
     ssl_mode: str = Field(default="prefer", max_length=32) # disable, prefer, require
     pool_size: int = Field(default=10)                    # 最大连接池上限，防止连接数爆炸
     connect_timeout: int = Field(default=10)              # 连接超时(秒)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class MachineDatabasePayload(BaseModel):

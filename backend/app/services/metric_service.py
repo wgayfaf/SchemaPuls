@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 from sqlmodel import Session, select, func
 from app.models import MonitorTarget, ProbeHistory
@@ -16,7 +16,7 @@ def get_dashboard_summary() -> Dict[str, Any]:
         unknown_count = sum(1 for t in targets if t.current_status == "UNKNOWN")
 
         # 计算近 24 小时的 SLA 可用率
-        since = datetime.utcnow() - timedelta(hours=24)
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
         total_probes = session.exec(
             select(func.count(ProbeHistory.id)).where(ProbeHistory.probed_at >= since)
         ).one() or 0
@@ -43,7 +43,7 @@ def get_dashboard_summary() -> Dict[str, Any]:
 def get_target_metrics(target_id: int, hours: int = 24) -> List[Dict[str, Any]]:
     """获取指定监控节点近 N 小时的时序指标点位 (供 ECharts 绘图)"""
     with Session(engine) as session:
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = (
             select(ProbeHistory)
             .where(ProbeHistory.target_id == target_id)

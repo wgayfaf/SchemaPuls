@@ -9,7 +9,7 @@
 """
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlmodel import Session, select
@@ -246,7 +246,7 @@ async def execute_scenario_probe(scenario_id: int, trigger: str = "scheduled") -
         steps: List[Dict[str, Any]] = list(scenario.steps or [])
         initial_scenario_vars = dict(scenario.variables or {})
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     # 场景专属变量池: 继承场景预设变量, 并在链路执行过程中接收各节点的提取变量 (隔离防污染)
     scenario_vars: Dict[str, Any] = dict(initial_scenario_vars)
     # 请求变量池: 环境全局变量作为只读底座, 场景专属变量优先覆盖 (严格隔离, 绝不反向污染外部环境)

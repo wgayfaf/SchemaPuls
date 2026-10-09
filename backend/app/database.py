@@ -190,9 +190,23 @@ def init_db():
 
 def migrate_flat_to_hierarchical():
     """将老版本 monitor_targets 单层平铺数据无缝迁移为 4 层拓扑资产模型"""
+    from datetime import datetime, timezone
     from app.models import (
         Environment, ServiceGroup, MachineNode, ApiProbe, MonitorTarget
     )
+
+    def _ensure_utc(dt):
+        if dt is None:
+            return None
+        if isinstance(dt, str):
+            try:
+                dt = datetime.fromisoformat(dt)
+            except Exception:
+                return datetime.now(timezone.utc)
+        if getattr(dt, "tzinfo", None) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     with Session(engine) as session:
         # 如果新体系中已有环境定义，则不重复初始化
         existing_env = session.exec(select(Environment)).first()
@@ -251,7 +265,8 @@ def migrate_flat_to_hierarchical():
                     current_status="ONLINE" if t.current_status == "HEALTHY" else ("OFFLINE" if t.current_status == "DOWN" else "UNKNOWN"),
                     consecutive_failures=t.consecutive_failures,
                     last_tcp_latency_ms=t.last_tcp_latency_ms,
-                    last_probed_at=t.last_probed_at,
+                    last_probed_at=_ensure_utc(t.last_probed_at),
+                    last_alert_at=_ensure_utc(t.last_alert_at),
                     email_receivers=t.email_receivers or []
                 )
                 session.add(machine)
@@ -276,7 +291,8 @@ def migrate_flat_to_hierarchical():
                 last_http_code=200 if t.current_status == "HEALTHY" else None,
                 last_http_latency_ms=t.last_http_latency_ms,
                 last_schema_matched=True if t.current_status == "HEALTHY" else False,
-                last_probed_at=t.last_probed_at,
+                last_probed_at=_ensure_utc(t.last_probed_at),
+                last_alert_at=_ensure_utc(t.last_alert_at),
                 email_receivers=t.email_receivers or []
             )
             session.add(probe)

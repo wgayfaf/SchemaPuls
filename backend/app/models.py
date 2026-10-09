@@ -1,6 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlmodel import SQLModel, Field, JSON, Column
+
+
+def utc_now() -> datetime:
+    """返回带有时区信息 (UTC) 的当前时间，满足 SQLModel 0.0.46+ UTCDateTime 规范"""
+    return datetime.now(timezone.utc)
 
 
 # ==========================================================
@@ -17,7 +22,7 @@ class Environment(SQLModel, table=True):
     base_url: Optional[str] = Field(default=None, max_length=255) # 环境默认前置服务 URL (如 https://api.example.com)
     order_num: int = Field(default=0)
     variables: Dict[str, Any] = Field(default={}, sa_column=Column(JSON)) # 环境变量池 (如 token, auth_token, 接口链式提取变量)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 
@@ -29,7 +34,7 @@ class ServiceGroup(SQLModel, table=True):
     environment_id: int = Field(foreign_key="environments.id", index=True)
     name: str = Field(max_length=64, index=True)
     description: Optional[str] = Field(default=None, max_length=255)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class MachineNode(SQLModel, table=True):
@@ -60,7 +65,7 @@ class MachineNode(SQLModel, table=True):
     last_error_message: Optional[str] = None            # 最近探活诊断或错误明细
     last_probed_at: Optional[datetime] = None
     last_alert_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class ApiProbe(SQLModel, table=True):
@@ -99,7 +104,7 @@ class ApiProbe(SQLModel, table=True):
     last_schema_matched: Optional[bool] = None
     last_probed_at: Optional[datetime] = None
     last_alert_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 # ==========================================================
@@ -117,7 +122,7 @@ class MachineProbeHistory(SQLModel, table=True):
     tcp_ok: bool = Field(default=False)
     tcp_latency_ms: Optional[float] = None
     error_message: Optional[str] = None
-    probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    probed_at: datetime = Field(default_factory=utc_now, index=True)
 
 
 class ApiProbeHistory(SQLModel, table=True):
@@ -136,7 +141,7 @@ class ApiProbeHistory(SQLModel, table=True):
     db_fixture_summary: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON)) # 数据库前置环境准备与销毁流水快照
     raw_response_snippet: Optional[str] = None
     is_healthy: bool = Field(default=False, index=True)
-    probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    probed_at: datetime = Field(default_factory=utc_now, index=True)
 
 
 class ScenarioProbe(SQLModel, table=True):
@@ -165,7 +170,7 @@ class ScenarioProbe(SQLModel, table=True):
     last_run_at: Optional[datetime] = None
     last_total_latency_ms: Optional[float] = None
     last_schema_matched: Optional[bool] = None          # 整链最新契约校验结果 (True=一致, False=突变, None=未配置或未校验)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class ScenarioProbeHistory(SQLModel, table=True):
@@ -181,7 +186,7 @@ class ScenarioProbeHistory(SQLModel, table=True):
     steps_detail: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))  # 逐节点执行明细
     scenario_variables: Dict[str, Any] = Field(default={}, sa_column=Column(JSON)) # 运行时场景变量池快照 (含初始变量与提取变量)
     error_message: Optional[str] = Field(default=None, max_length=500)
-    probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    probed_at: datetime = Field(default_factory=utc_now, index=True)
 
 
 # ==========================================================
@@ -215,7 +220,7 @@ class MonitorTarget(SQLModel, table=True):
     last_http_latency_ms: Optional[float] = None
     last_probed_at: Optional[datetime] = None
     last_alert_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class ProbeHistory(SQLModel, table=True):
@@ -231,7 +236,7 @@ class ProbeHistory(SQLModel, table=True):
     schema_diff_detail: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
     raw_response_snippet: Optional[str] = None
     is_healthy: bool = Field(index=True)
-    probed_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    probed_at: datetime = Field(default_factory=utc_now, index=True)
 
 
 class SmtpConfig(SQLModel, table=True):
@@ -246,7 +251,7 @@ class SmtpConfig(SQLModel, table=True):
     smtp_use_ssl: bool = Field(default=True)
     smtp_enabled: bool = Field(default=True)   # 邮件告警总开关
     alert_receivers: List[str] = Field(default=[], sa_column=Column(JSON))
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 # 导出 DB Fixture 插件中的数据库实体以供 SQLModel 统一元数据建表
